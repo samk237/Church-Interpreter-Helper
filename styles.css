@@ -16,8 +16,7 @@ body {
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   color: #f5f7ff;
-  background: radial-gradient(circle at 50% 25%, rgba(60, 80, 200, 0.12), transparent 55%),
-    radial-gradient(circle at 70% 60%, rgba(130, 160, 255, 0.08), transparent 60%), #010310;
+  background: transparent;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -37,10 +36,15 @@ body::after {
 }
 
 body::before {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.14) 0.5px, transparent 1px);
-  background-size: 120px 120px;
-  animation: star-drift 120s linear infinite;
-  opacity: 0.35;
+  background-image: 
+    radial-gradient(rgba(255, 255, 255, 1) 1px, transparent 1px),
+    radial-gradient(rgba(200, 220, 255, 0.9) 0.5px, transparent 0.5px),
+    radial-gradient(rgba(255, 240, 200, 1) 1.5px, transparent 1.5px),
+    radial-gradient(rgba(180, 200, 255, 0.8) 0.8px, transparent 0.8px),
+    radial-gradient(rgba(255, 230, 180, 1.2px) 1.2px, transparent 1.2px);
+  background-size: 87px 73px, 53px 67px, 127px 89px, 71px 103px, 149px 61px;
+  animation: none;
+  opacity: 1;
 }
 
 body::after {
@@ -48,23 +52,74 @@ body::after {
   left: 0;
   right: auto;
   bottom: auto;
-  width: 2px;
-  height: 2px;
+  width: 4px;
+  height: 4px;
   background: transparent;
-  box-shadow: 12vw 10vh 2px rgba(255, 255, 255, 0.9), 32vw 24vh 1px rgba(255, 255, 255, 0.7),
-    54vw 16vh 3px rgba(255, 255, 255, 0.85), 76vw 30vh 1px rgba(255, 255, 255, 0.55),
-    15vw 44vh 2px rgba(255, 255, 255, 0.7), 42vw 58vh 1px rgba(255, 255, 255, 0.9),
-    6vw 70vh 4px rgba(255, 255, 255, 0.75), 28vw 82vh 2px rgba(255, 255, 255, 0.6),
-    62vw 12vh 1px rgba(255, 255, 255, 0.8), 84vw 52vh 3px rgba(255, 255, 255, 0.9),
-    90vw 68vh 2px rgba(255, 255, 255, 0.7), 70vw 78vh 1px rgba(255, 255, 255, 0.6),
-    22vw 90vh 3px rgba(255, 255, 255, 0.5), 5vw 35vh 2px rgba(255, 255, 255, 0.75),
-    48vw 8vh 4px rgba(255, 255, 255, 0.8), 60vw 40vh 2px rgba(255, 255, 255, 0.65),
-    18vw 18vh 3px rgba(255, 255, 255, 0.8), 35vw 68vh 1px rgba(255, 255, 255, 0.6),
-    78vw 12vh 2px rgba(255, 255, 255, 0.75), 95vw 24vh 3px rgba(255, 255, 255, 0.7),
-    12vw 60vh 1px rgba(255, 255, 255, 0.7), 40vw 88vh 2px rgba(255, 255, 255, 0.55),
-    55vw 70vh 3px rgba(255, 255, 255, 0.9), 88vw 90vh 1px rgba(255, 255, 255, 0.6);
-  animation: twinkle 6s ease-in-out infinite alternate;
+  box-shadow: 
+    /* Large bright stars - very prominent */
+    12vw 10vh 4px 2px rgba(255, 255, 255, 1), 
+    32vw 24vh 3px 1px rgba(255, 230, 200, 1),
+    54vw 16vh 5px 2px rgba(230, 240, 255, 1), 
+    76vw 30vh 4px 1px rgba(255, 245, 230, 1),
+    8vw 15vh 6px 2px rgba(200, 220, 255, 1),
+    45vw 8vh 4px 1px rgba(255, 240, 220, 1),
+    85vw 65vh 5px 2px rgba(240, 245, 255, 1),
+    25vw 35vh 3px 1px rgba(255, 235, 210, 1),
+    
+    /* Medium stars with strong colors */
+    15vw 44vh 3px rgba(220, 230, 255, 1), 
+    42vw 58vh 3px rgba(255, 240, 220, 1),
+    6vw 70vh 4px rgba(230, 245, 255, 1), 
+    28vw 82vh 2px rgba(255, 235, 210, 1),
+    62vw 12vh 3px rgba(210, 225, 255, 1), 
+    84vw 52vh 4px rgba(255, 250, 235, 1),
+    90vw 68vh 3px rgba(240, 245, 255, 1), 
+    70vw 78vh 2px rgba(255, 240, 225, 1),
+    18vw 25vh 4px rgba(215, 230, 255, 1),
+    55vw 45vh 3px rgba(255, 240, 220, 1),
+    75vw 15vh 4px rgba(230, 245, 255, 1),
+    35vw 85vh 3px rgba(255, 235, 215, 1),
+    
+    /* Small bright twinkling stars */
+    22vw 90vh 2px rgba(220, 235, 255, 0.9), 
+    5vw 35vh 2px rgba(255, 245, 230, 0.9),
+    48vw 8vh 3px rgba(225, 240, 255, 0.9), 
+    60vw 40vh 2px rgba(255, 250, 240, 0.9),
+    78vw 12vh 2px rgba(230, 245, 255, 0.9), 
+    95vw 24vh 3px rgba(255, 235, 215, 0.9),
+    12vw 60vh 2px rgba(240, 245, 255, 0.9), 
+    40vw 88vh 2px rgba(255, 245, 235, 0.9),
+    55vw 70vh 3px rgba(220, 235, 255, 0.9), 
+    88vw 90vh 2px rgba(255, 250, 240, 0.9),
+    
+    /* Extra density stars */
+    25vw 50vh 2px rgba(210, 230, 255, 0.8),
+    65vw 35vh 2px rgba(255, 240, 225, 0.8),
+    45vw 75vh 2px rgba(235, 245, 255, 0.8),
+    80vw 45vh 3px rgba(255, 235, 220, 0.8),
+    10vw 60vh 2px rgba(200, 235, 255, 0.8),
+    50vw 20vh 2px rgba(255, 245, 230, 0.8),
+    90vw 30vh 2px rgba(240, 240, 255, 0.8),
+    30vw 10vh 2px rgba(255, 230, 210, 0.8),
+    70vw 80vh 2px rgba(220, 240, 255, 0.8),
+    15vw 80vh 2px rgba(255, 240, 235, 0.8),
+    95vw 75vh 2px rgba(230, 235, 255, 0.8),
+    5vw 50vh 2px rgba(255, 245, 240, 0.8);
+  animation: twinkle 4s ease-in-out infinite, twinkle 3.2s ease-in-out infinite 0.8s, twinkle 5.1s ease-in-out infinite 1.6s;
 }
+
+
+/* Additional shooting stars using body pseudo-elements */
+body::before {
+  background-image: 
+    radial-gradient(rgba(255, 255, 255, 0.8) 1px, transparent 1px),
+    radial-gradient(rgba(200, 220, 255, 0.6) 0.5px, transparent 0.5px),
+    radial-gradient(rgba(255, 240, 200, 0.7) 1.5px, transparent 1.5px);
+  background-size: 60px 60px, 40px 40px, 100px 100px;
+  animation: star-drift 200s linear infinite;
+  opacity: 0.8;
+}
+
 
 .session-bar {
   display: flex;
@@ -110,14 +165,33 @@ body::after {
   flex: 1;
   width: min(960px, calc(100% - 2.5rem));
   margin: 1.5rem auto 2.5rem;
-  background: linear-gradient(160deg, rgba(16, 22, 50, 0.8), rgba(16, 12, 35, 0.75));
+  background: linear-gradient(160deg, rgba(20, 28, 60, 0.85), rgba(18, 15, 40, 0.8));
   border-radius: 24px;
-  backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(150, 170, 255, 0.2);
+  box-shadow: 
+    0 30px 80px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(100, 120, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+.chat-container::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  padding: 2px;
+  background: linear-gradient(135deg, rgba(140, 160, 255, 0.3), rgba(180, 140, 255, 0.2), transparent 50%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.6;
 }
 
 .chat-log {
@@ -136,19 +210,60 @@ body::after {
   max-width: 100%;
   padding: 1.1rem 1.4rem;
   border-radius: 18px;
-  background: rgba(22, 28, 54, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(25, 32, 65, 0.85), rgba(18, 25, 50, 0.9));
+  border: 1px solid rgba(140, 160, 255, 0.15);
   display: grid;
   gap: 0.35rem;
-  box-shadow: 0 12px 30px rgba(8, 10, 25, 0.45);
+  box-shadow: 
+    0 12px 30px rgba(8, 10, 25, 0.5),
+    0 0 20px rgba(100, 120, 255, 0.05);
   position: relative;
+  backdrop-filter: blur(10px);
+  animation: fadeIn 0.3s ease-out;
+}
+
+.chat-bubble::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 18px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(140, 160, 255, 0.2), rgba(180, 140, 255, 0.1));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.chat-bubble:hover::before {
+  opacity: 1;
 }
 
 .chat-bubble.user {
-  background: linear-gradient(135deg, rgba(112, 118, 255, 0.85), rgba(177, 135, 255, 0.7));
-  border: 1px solid rgba(180, 150, 255, 0.4);
+  background: linear-gradient(135deg, rgba(120, 95, 255, 0.9), rgba(180, 110, 255, 0.85));
+  border: 1px solid rgba(200, 150, 255, 0.5);
   margin-left: auto;
   color: #ffffff;
+  box-shadow: 
+    0 12px 30px rgba(120, 80, 255, 0.3),
+    0 0 30px rgba(150, 100, 255, 0.2);
+}
+
+.chat-bubble.user::before {
+  background: linear-gradient(135deg, rgba(200, 180, 255, 0.4), rgba(220, 200, 255, 0.2));
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chat-bubble .chat-meta {
@@ -327,22 +442,27 @@ body::after {
 
 @keyframes twinkle {
   0% {
-    opacity: 0.5;
-    filter: blur(0.5px);
+    opacity: 0.1;
+  }
+  25% {
+    opacity: 0.9;
   }
   50% {
-    opacity: 1;
-    filter: blur(1px);
+    opacity: 0.2;
+  }
+  75% {
+    opacity: 0.7;
   }
   100% {
-    opacity: 0.4;
-    filter: blur(0.8px);
+    opacity: 0.1;
   }
 }
 
+
 @media (prefers-reduced-motion: reduce) {
   body::before,
-  body::after {
+  body::after,
+  .chat-bubble {
     animation: none !important;
   }
 
@@ -351,11 +471,3 @@ body::after {
   }
 }
 
-@keyframes star-drift {
-  from {
-    transform: rotate(0deg) scale(1.05);
-  }
-  to {
-    transform: rotate(360deg) scale(1.05);
-  }
-}
