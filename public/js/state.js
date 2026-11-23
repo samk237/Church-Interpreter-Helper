@@ -57,16 +57,25 @@ export async function loadCustomWords() {
   }
 }
 
-export async function addCustomWord({ ko, en, note }) {
+/** Save / update a word. status "confirmed" (default) or "ai"; `replaces` = old Korean spelling when editing. */
+export async function addCustomWord({ ko, en, note, alt, status = "confirmed", replaces }) {
   const r = await fetch("/api/custom-words", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ko, en, note }),
+    body: JSON.stringify({ ko, en, note, alt, status, replaces }),
   });
   const payload = await r.json();
   if (!r.ok) throw new Error(payload.error ?? "Could not save");
   rebuild(payload.words);
 }
+
+/** Mark an AI-suggested word as reviewed and correct (keeps it permanently). */
+export async function confirmAiWord(ko) {
+  const w = customWords.find((x) => x.ko === ko);
+  if (w) await addCustomWord({ ...w, status: "confirmed" });
+}
+
+export const aiReviewCount = () => customWords.filter((w) => w.status === "ai").length;
 
 export async function deleteCustomWord(ko) {
   const r = await fetch(`/api/custom-words?ko=${encodeURIComponent(ko)}`, { method: "DELETE" });
@@ -78,6 +87,7 @@ export function listBadge(id) {
   const m = id.match(/^wl(\d+)(b?)$/);
   if (m) return `#${m[1]}${m[2]}`;
   if (id === "custom") return "mine";
+  if (id === "ai") return "AI · unreviewed";
   if (id === "thanksgiving") return "feasts";
   return id;
 }
@@ -95,9 +105,10 @@ export async function machineTranslate(text, sourceLang, hints = []) {
   const r = await fetch("/api/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, sourceLang, hints }),
+    body: JSON.stringify({ text, sourceLang, hints, autosave: true }),
   });
   const payload = await r.json();
   if (!r.ok) throw new Error(payload.error ?? "Machine translation unavailable");
+  if (payload.saved) await loadCustomWords(); // new AI word is now in the Glossary (for review)
   return payload;
 }

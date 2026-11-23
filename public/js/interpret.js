@@ -1,10 +1,11 @@
 import { looksLikeReference, parseReferences, formatReference } from "/lib/reference.js";
-import { addCustomWord, fetchScripture, getGlossary, load, machineTranslate, save, settings } from "./state.js";
+import { addCustomWord, confirmAiWord, fetchScripture, getGlossary, load, machineTranslate, save, settings } from "./state.js";
 import { download, h, renderEntry, renderPassages, snapshot } from "./dom.js";
 
 const STORAGE_KEY = "cih.sessions.v1";
 const DECKS_KEY = "cih.decks.v1";
-const AUTO_MT_MAX_CHARS = 60;
+// Up to about one sentence is translated automatically; longer text gets a button (use Claude for paragraphs).
+const AUTO_MT_MAX_CHARS = 200;
 
 const $ = (id) => document.getElementById(id);
 const chatLog = $("chatLog");
@@ -109,6 +110,7 @@ function buildLookupData(text) {
     query: text,
     language: r.language,
     long: text.length > 40 || text.includes("\n"),
+    sentence: text.length > 40 || text.includes("\n") || text.trim().split(/\s+/).length >= 3,
     exact: r.exact.map(snapshot),
     found,
     suggestions: r.suggestions.map((e) => ({ ko: e.ko, en: e.en })),
@@ -117,7 +119,7 @@ function buildLookupData(text) {
 }
 
 // Machine-translate only when your lists didn't fully answer it (single words matched via conjugation count as answered).
-const needsMt = (data) => data.exact.length === 0 && (data.found.length === 0 || data.long);
+const needsMt = (data) => data.exact.length === 0 && (data.found.length === 0 || data.sentence || data.long);
 
 async function runMt(data, bubble, msg) {
   const hints = [...data.exact, ...data.found.map((f) => f.entry)].map((e) => ({ ko: e.ko, en: e.senses[0]?.en ?? "" }));
@@ -125,7 +127,14 @@ async function runMt(data, bubble, msg) {
   fillBubble(bubble, data);
   try {
     const r = await machineTranslate(data.query, data.language, hints);
-    data.mt = { text: r.translatedText, provider: r.provider };
+    const hit = r.glossaryHit ? getGlossary().get(r.glossaryHit) : null;
+    data.mt = {
+      text: r.translatedText,
+      provider: r.provider,
+      corrected: r.corrected ?? null,
+      saved: r.saved ? { ko: r.saved.ko, en: r.saved.en } : null,
+      glossaryEntry: hit ? snapshot(hit) : null,
+    };
   } catch (error) {
     data.mt = { error: error.message };
   }
@@ -137,7 +146,7 @@ async function runMt(data, bubble, msg) {
 // ---------------------------------------------------------------------------
 // Rendering results
 // ---------------------------------------------------------------------------
-function renderResult(data, bubble) {
+function renderResult(data) {
   if (data.type === "scripture") {
     return h("div", {}, h("div", { class: "source-label scripture" }, `📖 ${data.payload.english?.short ?? "English"} · ${data.payload.korean?.short ?? "Korean"}`), renderPassages(data.payload));
   }
@@ -146,42 +155,33 @@ function renderResult(data, bubble) {
 
   const box = h("div", {});
   const hasGlossary = data.exact.length || data.found.length;
+  const sentence = Boolean(data.sentence || data.long);
+
+  // A sentence: the translation is the main answer, your terms go underneath.
+  if (sentence && !data.exact.length) {
+    box.append(renderMt(data, { sentence: true }));
+    if (data.found.length) {
+      box.append(h("div", { class: "source-label glossary", style: "margin-top:12px" }, `✓ Your terms in this sentence (${data.found.length})`));
+      box.append(renderFoundTable(data));
+      if (data.long) {
+        box.append(h("div", { class: "row-actions" }, h("button", { class: "ghost-btn small", onclick: (e) => makeDeck(data, e.target) }, "Make flashcards from these")));
+      }
+    }
+    return box;
+  }
 
   if (data.exact.length) {
-    box.append(h("div", { class: "source-label glossary" }, "✓ Your word lists"));
-    data.exact.forEach((e) => box.append(renderEntry(e)));
-  } else if (data.found.length && (data.long || data.found.length > 1 || data.language === "en")) {
-    box.append(
-      h("div", { class: "source-label glossary" }, `✓ ${data.found.length} word${data.found.length > 1 ? "s" : ""} from your lists`)
-    );
-    box.append(
-      h(
-        "table",
-        { class: "scan-table" },
-        data.found.map((f) =>
-          h(
-            "tr",
-            {},
-            h("td", {}, f.entry.ko, f.count > 1 ? h("span", { class: "count" }, ` ×${f.count}`) : null),
-            h(
-              "td",
-              {},
-              f.entry.senses.map((s) => s.en).join(" · "),
-              ...[...new Set(f.entry.senses.map((s) => s.note).filter(Boolean))].map((n) => h("div", { class: "note" }, "ⓘ ", n))
-            )
-          )
-        )
-      )
-    );
-    if (data.long && data.found.length) {
-      box.append(
-        h(
-          "div",
-          { class: "row-actions" },
-          h("button", { class: "ghost-btn small", onclick: (e) => makeDeck(data, e.target) }, "Make flashcards from these")
-        )
-      );
+    if (data.exact.every((e) => e.ai)) {
+      box.append(h("div", { class: "source-label mt" }, "🤖 AI suggestion saved earlier — not reviewed yet"));
+      data.exact.forEach((e) => box.append(renderEntry(e)));
+      box.append(reviewButtons(data.exact[0]));
+    } else {
+      box.append(h("div", { class: "source-label glossary" }, "✓ Your word lists"));
+      data.exact.forEach((e) => box.append(renderEntry(e)));
     }
+  } else if (data.found.length > 1 || (data.found.length && data.language === "en")) {
+    box.append(h("div", { class: "source-label glossary" }, `✓ ${data.found.length} word${data.found.length > 1 ? "s" : ""} from your lists`));
+    box.append(renderFoundTable(data));
   } else if (data.found.length) {
     box.append(h("div", { class: "source-label glossary" }, `✓ Matched “${data.found[0].text}” in your lists`));
     data.found.forEach((f) => box.append(renderEntry(f.entry)));
@@ -195,56 +195,117 @@ function renderResult(data, bubble) {
         "div",
         { class: "live-suggest", style: "padding:8px 0 0" },
         h("span", { class: "muted small" }, hasGlossary ? "Related:" : "Did you mean:"),
-        data.suggestions.map((s) =>
-          h("button", { class: "chip", onclick: () => submit(s.ko) }, h("b", {}, s.ko), h("span", { class: "en" }, trim(s.en, 32)))
-        )
+        data.suggestions.map((s) => h("button", { class: "chip", onclick: () => submit(s.ko) }, h("b", {}, s.ko), h("span", { class: "en" }, trim(s.en, 32))))
       )
     );
   }
 
-  // Machine translation (clearly labelled, never mixed with glossary results)
-  if (!data.exact.length) {
-    if (data.mt?.loading) {
-      box.append(h("div", { class: "mt-box" }, h("span", { class: "muted small" }, "Machine translating…")));
-    } else if (data.mt?.text) {
-      box.append(
-        h(
-          "div",
-          { class: "mt-box" },
-          h("div", { class: "source-label mt" }, `⚠ Machine translation · ${data.mt.provider} — verify`),
-          h("div", { class: "mt-text" }, data.mt.text),
-          data.long ? null : saveWordControls(data)
-        )
-      );
-    } else if (data.mt?.error) {
-      box.append(h("div", { class: "mt-box" }, h("span", { class: "muted small" }, `Machine translation unavailable: ${data.mt.error}`), saveWordControls(data)));
-    } else {
-      box.append(
-        h(
-          "div",
-          { class: "row-actions" },
-          h(
-            "button",
-            {
-              class: "ghost-btn small",
-              onclick: (e) => {
-                const bubbleEl = e.target.closest(".chat-bubble");
-                const msg = findMsgForBubble(bubbleEl);
-                runMt(data, bubbleEl, msg ?? { text: "" });
-              },
-            },
-            "Machine-translate"
-          ),
-          data.long ? null : h("button", { class: "ghost-btn small", onclick: (e) => e.target.replaceWith(saveWordControls(data, true)) }, "Add to my words")
-        )
-      );
-    }
-  }
+  if (!data.exact.length) box.append(renderMt(data, { sentence: false }));
   return box;
 }
 
-function saveWordControls(data, open = false) {
-  const isKo = data.language === "ko";
+function renderFoundTable(data) {
+  return h(
+    "table",
+    { class: "scan-table" },
+    data.found.map((f) =>
+      h(
+        "tr",
+        {},
+        h("td", {}, f.entry.ko, f.count > 1 ? h("span", { class: "count" }, ` ×${f.count}`) : null),
+        h(
+          "td",
+          {},
+          f.entry.senses.map((s) => s.en).join(" · "),
+          f.entry.ai ? h("span", { class: "badge ai" }, "AI · unreviewed") : null,
+          ...[...new Set(f.entry.senses.map((s) => s.note).filter(Boolean))].map((n) => h("div", { class: "note" }, "ⓘ ", n))
+        )
+      )
+    )
+  );
+}
+
+/** The AI box — always visually separate from your glossary. */
+function renderMt(data, { sentence }) {
+  const mt = data.mt;
+  if (mt?.loading) return h("div", { class: "mt-box" }, h("span", { class: "muted small" }, sentence ? "Translating sentence (AI)…" : "Asking AI…"));
+
+  if (mt?.text) {
+    const box = h("div", { class: "mt-box" });
+    box.append(
+      h("div", { class: "source-label mt" }, sentence ? `🤖 Sentence · AI (${mt.provider}) using your terms — verify` : `🤖 AI · ${mt.provider} — verify`)
+    );
+    if (mt.glossaryEntry) {
+      // AI fixed the spelling and the fixed word is already in your lists: show YOUR entry.
+      box.append(h("div", { class: "muted small" }, "Did you mean ", h("b", {}, mt.glossaryEntry.ko), "? It's in your word lists:"));
+      box.append(renderEntry(mt.glossaryEntry));
+      return box;
+    }
+    if (mt.corrected) {
+      box.append(
+        h("div", { class: "live-suggest", style: "padding:0 0 6px" }, h("span", { class: "muted small" }, "Did you mean:"), h("button", { class: "chip", onclick: () => submit(mt.corrected) }, h("b", {}, mt.corrected)))
+      );
+    }
+    box.append(h("div", { class: "mt-text" }, mt.text));
+    if (mt.saved) {
+      box.append(h("div", { class: "muted small", style: "margin-top:6px" }, `Saved to Glossary → “AI — needs review” as ${mt.saved.ko} = ${mt.saved.en}`));
+      box.append(reviewButtons({ ko: mt.saved.ko, en: mt.saved.en, senses: [{ en: mt.saved.en, note: "" }] }));
+    } else if (!sentence) {
+      box.append(saveWordControls(data));
+    }
+    return box;
+  }
+
+  if (mt?.error) {
+    return h("div", { class: "mt-box" }, h("span", { class: "muted small" }, `AI fallback unavailable: ${mt.error}`), sentence ? null : saveWordControls(data));
+  }
+
+  return h(
+    "div",
+    { class: "row-actions" },
+    h(
+      "button",
+      {
+        class: "ghost-btn small",
+        onclick: (e) => {
+          const bubbleEl = e.target.closest(".chat-bubble");
+          runMt(data, bubbleEl, findMsgForBubble(bubbleEl) ?? { text: "" });
+        },
+      },
+      sentence ? "Translate sentence (AI)" : "Ask AI"
+    ),
+    sentence ? null : h("button", { class: "ghost-btn small", onclick: (e) => e.target.replaceWith(saveWordControls(data, true)) }, "Add to my words")
+  );
+}
+
+/** Optional in-the-moment review of an AI word (otherwise review later in the Glossary tab). */
+function reviewButtons(entry) {
+  const row = h("div", { class: "row-actions" });
+  row.append(
+    h(
+      "button",
+      {
+        class: "ghost-btn small grade-easy",
+        onclick: async () => {
+          await confirmAiWord(entry.ko);
+          row.replaceWith(h("div", { class: "source-label glossary" }, "✓ Confirmed — permanent in your glossary"));
+        },
+      },
+      "✓ Correct"
+    ),
+    h(
+      "button",
+      {
+        class: "ghost-btn small",
+        onclick: () => row.replaceWith(editWordForm(entry.ko, entry.senses?.[0]?.en ?? entry.en ?? "", "")),
+      },
+      "Edit"
+    )
+  );
+  return row;
+}
+
+function editWordForm(ko, en, note) {
   const form = h(
     "form",
     {
@@ -253,18 +314,24 @@ function saveWordControls(data, open = false) {
         e.preventDefault();
         const fd = new FormData(form);
         try {
-          await addCustomWord({ ko: fd.get("ko"), en: fd.get("en"), note: fd.get("note") });
-          form.replaceWith(h("div", { class: "source-label glossary" }, "✓ Saved to your words — it will match exactly from now on"));
+          await addCustomWord({ ko: fd.get("ko"), en: fd.get("en"), note: fd.get("note"), replaces: ko });
+          form.replaceWith(h("div", { class: "source-label glossary" }, "✓ Saved — permanent in your glossary"));
         } catch (error) {
           form.append(h("div", { class: "note" }, error.message));
         }
       },
     },
-    h("input", { name: "ko", value: isKo ? data.query : data.mt?.text ?? "", placeholder: "한국어", required: true }),
-    h("input", { name: "en", value: isKo ? data.mt?.text ?? "" : data.query, placeholder: "English", required: true }),
-    h("input", { name: "note", placeholder: "note (optional)" }),
-    h("button", { class: "pill-btn small", type: "submit" }, "Save word")
+    h("input", { name: "ko", value: ko, placeholder: "한국어", required: true }),
+    h("input", { name: "en", value: en, placeholder: "English", required: true }),
+    h("input", { name: "note", value: note, placeholder: "note (optional)" }),
+    h("button", { class: "pill-btn small", type: "submit" }, "Save")
   );
+  return form;
+}
+
+function saveWordControls(data, open = false) {
+  const isKo = data.language === "ko";
+  const form = editWordForm(isKo ? data.mt?.corrected ?? data.query : data.mt?.text ?? "", isKo ? data.mt?.text ?? "" : data.query, "");
   if (open) return form;
   const btn = h("button", { class: "ghost-btn small", type: "button", onclick: () => btn.replaceWith(form) }, "Save as my word");
   return h("div", { class: "row-actions" }, btn);
@@ -350,7 +417,7 @@ function appendBubble(role, content) {
 function fillBubble(bubble, data) {
   const body = bubble.querySelector(".chat-text");
   body.innerHTML = "";
-  body.append(renderResult(data, bubble));
+  body.append(renderResult(data));
   scrollToBottom();
 }
 
@@ -491,7 +558,7 @@ function exportSession() {
 // ---------------------------------------------------------------------------
 function plainLookup(data) {
   const rows = [...data.exact, ...data.found.map((f) => f.entry)].map((e) => `${e.ko} — ${e.senses.map((s) => s.en).join(" · ")}`);
-  if (data.mt?.text) rows.push(`(machine translation, ${data.mt.provider}) ${data.mt.text}`);
+  if (data.mt?.text) rows.push(`(AI, ${data.mt.provider}) ${data.mt.corrected ? `[did you mean ${data.mt.corrected}?] ` : ""}${data.mt.text}`);
   if (!rows.length) rows.push("Not in word lists." + (data.suggestions.length ? ` Similar: ${data.suggestions.map((s) => s.ko).join(", ")}` : ""));
   return rows.join("\n");
 }

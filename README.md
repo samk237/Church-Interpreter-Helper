@@ -21,7 +21,10 @@ Optional: copy `.env.local.example` to `.env.local` to add an ESV API key or cho
 - **Every meaning is kept.** When a word appears in several lists (감동, 마음이 아프다, 고민…), all meanings are shown, each with the list it came from.
 - **English → Korean** works too (`jealous` → 질투 / 시기 / 시기하다).
 - **Paste sermon notes or a bulletin** to see every glossary word in them, then press **Make flashcards from these** to study before the service.
-- **Words that aren't in your lists** are shown as *Not in your word lists*, followed by a separate box labelled **⚠ Machine translation — verify**. Press **Save as my word** to keep the corrected meaning; from then on it matches exactly, like every other word.
+- **Words that aren't in your lists** are shown as *Not in your word lists*, with "Did you mean" suggestions from your glossary. Below that, in a separate box labelled **🤖 AI — verify**, the local AI gives its translation. For English typos, the AI also offers a spelling "Did you mean" (providance → providence).
+- **AI words are saved for review automatically.** Each AI answer for a single word is saved as *AI · unreviewed*, so you don't have to judge it mid-service. Next time it matches instantly, still flagged. You can tap **✓ Correct** or **Edit** right away, or review later: the **Glossary** tab shows a count badge, and its *🤖 AI — needs review* filter has ✓ (keep), Edit (fix), and ✗ (delete) for each word. Confirmed words become permanent. Unreviewed words stay out of flashcard decks.
+- **Phrases up to about a sentence** (≤ 200 characters) are translated automatically. The AI translation of the sentence comes first, using your glossary terms, with *Your terms in this sentence* listed underneath. For longer text you get a button; for full paragraphs, use Claude.
+- **English → Korean is automatic.** Type English and it does a reverse lookup in your lists, or uses the AI if the word isn't there.
 
 ### Scripture
 Type references the way you'd jot them down:
@@ -47,7 +50,7 @@ Search Korean, English, notes, or 초성. Filter by list or ★. Add your own wo
 
 ## Adding words
 
-- **From the app:** use *Save as my word* or Glossary → *Add a word*. These are saved to `data/custom-words.json`. Commit that file to back it up.
+- **From the app:** use *Save as my word*, Glossary → *Add a word*, or confirm AI words. Everything is saved locally in `data/custom-words.json` (`"status": "ai"` means not reviewed yet). There are no accounts and nothing goes to the cloud. Commit that file to back it up.
 - **A whole new list:** copy a block in [`data/word-lists.js`](data/word-lists.js):
   ```js
   { id: "wl14", title: "Word List #14", entries: [

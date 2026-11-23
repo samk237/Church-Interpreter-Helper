@@ -1,4 +1,4 @@
-import { loadCustomWords, onGlossaryChange, saveSettings, settings } from "./state.js";
+import { aiReviewCount, loadCustomWords, onGlossaryChange, saveSettings, settings } from "./state.js";
 import { initInterpret } from "./interpret.js";
 import { initStudy, refreshStudy, setStudyActive } from "./study.js";
 import { initGlossaryView, renderGlossary } from "./glossary-view.js";
@@ -48,9 +48,17 @@ async function initSettings() {
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
 
+function updateReviewBadge() {
+  const n = aiReviewCount();
+  const tab = document.querySelector('.tab[data-view="glossary"]');
+  tab.textContent = "Glossary";
+  if (n) tab.append(Object.assign(document.createElement("span"), { className: "tab-badge", textContent: n, title: `${n} AI word(s) to review` }));
+}
+
 onGlossaryChange(() => {
   renderGlossary();
   refreshStudy();
+  updateReviewBadge();
 });
 
 initSettings();

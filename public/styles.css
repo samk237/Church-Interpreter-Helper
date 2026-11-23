@@ -416,6 +416,33 @@ input[type="text"] {
   margin-left: 6px;
   vertical-align: middle;
 }
+.badge.ai {
+  color: var(--mt);
+  border-color: rgba(255, 207, 138, 0.45);
+}
+.tab-badge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--mt);
+  color: #1a1200;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.g-row.ai {
+  background: rgba(255, 207, 138, 0.05);
+}
+.review-actions {
+  display: flex;
+  gap: 6px;
+}
+.review-edit {
+  grid-column: 1 / -1;
+}
 .note {
   font-size: 0.88rem;
   color: var(--warn);

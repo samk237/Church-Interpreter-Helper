@@ -23,6 +23,7 @@ export function snapshot(entry) {
     ko: entry.ko,
     alts: entry.alts,
     star: entry.star,
+    ai: Boolean(entry.ai),
     senses: entry.senses.map((s) => ({ en: s.en, note: s.note, lists: s.lists })),
   };
 }
@@ -42,7 +43,7 @@ export function renderEntry(entry) {
     h(
       "ul",
       { class: "senses" },
-      entry.senses.map((s) => h("li", {}, s.en, ...s.lists.map((l) => h("span", { class: "badge" }, listBadge(l)))))
+      entry.senses.map((s) => h("li", {}, s.en, ...s.lists.map((l) => h("span", { class: l === "ai" ? "badge ai" : "badge" }, listBadge(l)))))
     ),
     ...[...new Set(notes)].map((n) => h("div", { class: "note" }, "ⓘ ", n))
   );

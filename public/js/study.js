@@ -52,7 +52,7 @@ function populateDecks() {
   const options = [
     ["star", `★ Starred (${g.entries.filter((e) => e.star).length})`],
     ["review", "Needs review (missed before)"],
-    ["all", `All words (${g.size})`],
+    ["all", `All words (${g.entries.filter((e) => !e.ai).length})`],
     ...wordLists.map((l) => [`list:${l.id}`, `${l.title} (${l.entries.length})`]),
     ["list:custom", `My added words (${g.entries.filter((e) => e.custom).length})`],
     ...scriptureLists.map((l) => [`scripture:${l.id}`, `📖 ${l.title} (${l.passages.length})`]),
@@ -66,16 +66,17 @@ function populateDecks() {
 function deckCards(deckId) {
   const g = getGlossary();
   const word = (e) => ({ id: `w:${e.id}`, type: "word", entry: e });
-  if (deckId === "all") return g.entries.map(word);
-  if (deckId === "star") return g.entries.filter((e) => e.star).map(word);
+  const entries = g.entries.filter((e) => !e.ai); // unreviewed AI words stay out of study decks
+  if (deckId === "all") return entries.map(word);
+  if (deckId === "star") return entries.filter((e) => e.star).map(word);
   if (deckId === "review") {
-    const words = g.entries.filter((e) => progress[`w:${e.id}`]?.wrong > 0 && (progress[`w:${e.id}`]?.box ?? 0) < MASTERED_BOX).map(word);
+    const words = entries.filter((e) => progress[`w:${e.id}`]?.wrong > 0 && (progress[`w:${e.id}`]?.box ?? 0) < MASTERED_BOX).map(word);
     const verses = allScriptureCards().filter((c) => progress[c.id]?.wrong > 0 && (progress[c.id]?.box ?? 0) < MASTERED_BOX);
     return [...words, ...verses];
   }
   if (deckId.startsWith("list:")) {
     const id = deckId.slice(5);
-    return g.entries.filter((e) => e.lists.includes(id)).map(word);
+    return entries.filter((e) => e.lists.includes(id)).map(word);
   }
   if (deckId.startsWith("scripture:")) {
     const list = scriptureLists.find((l) => l.id === deckId.slice(10));
@@ -83,7 +84,7 @@ function deckCards(deckId) {
   }
   if (deckId.startsWith("deck:")) {
     const d = load(DECKS_KEY, []).find((x) => `deck:${x.id}` === deckId);
-    return (d?.words ?? []).map((ko) => g.get(ko)).filter(Boolean).map(word);
+    return (d?.words ?? []).map((ko) => g.get(ko)).filter((e) => e && !e.ai).map(word);
   }
   return [];
 }

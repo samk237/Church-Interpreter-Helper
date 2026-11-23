@@ -1,4 +1,4 @@
-import { addCustomWord, deleteCustomWord, getGlossary, listBadge, wordLists } from "./state.js";
+import { addCustomWord, aiReviewCount, confirmAiWord, deleteCustomWord, getGlossary, listBadge, wordLists } from "./state.js";
 import { download, h } from "./dom.js";
 
 const $ = (id) => document.getElementById(id);
@@ -7,6 +7,7 @@ const RENDER_LIMIT = 400;
 export function initGlossaryView() {
   const filter = $("glossaryListFilter");
   filter.append(h("option", { value: "all" }, "All lists"));
+  filter.append(h("option", { value: "ai", id: "aiFilterOption" }, "🤖 AI — needs review"));
   wordLists.forEach((l) => filter.append(h("option", { value: l.id }, l.title)));
   filter.append(h("option", { value: "custom" }, "My added words"));
 
@@ -56,7 +57,9 @@ export function renderGlossary() {
     list: $("glossaryListFilter").value || "all",
     starredOnly: $("glossaryStarred").checked,
   });
-  results.sort((a, b) => a.ko.localeCompare(b.ko, "ko"));
+  const opt = document.getElementById("aiFilterOption");
+  if (opt) opt.textContent = `🤖 AI — needs review (${aiReviewCount()})`;
+  results.sort((a, b) => (b.ai - a.ai) || a.ko.localeCompare(b.ko, "ko")); // unreviewed AI words first
   $("glossaryCount").textContent = `${results.length} of ${g.size} words`;
 
   const table = $("glossaryTable");
@@ -65,15 +68,15 @@ export function renderGlossary() {
     table.append(
       h(
         "div",
-        { class: "g-row" },
+        { class: e.ai ? "g-row ai" : "g-row" },
         h("div", { class: "g-ko" }, e.ko, e.star ? h("span", { class: "star" }, " ★") : null, e.alts.length ? h("div", { class: "entry-alt" }, e.alts.join(", ")) : null),
         h(
           "div",
           { class: "g-en" },
-          e.senses.map((s) => h("div", {}, s.en, ...s.lists.map((l) => h("span", { class: "badge" }, listBadge(l))))),
+          e.senses.map((s) => h("div", {}, s.en, ...s.lists.map((l) => h("span", { class: l === "ai" ? "badge ai" : "badge" }, listBadge(l))))),
           ...[...new Set(e.senses.map((s) => s.note).filter(Boolean))].map((n) => h("div", { class: "note" }, "ⓘ ", n))
         ),
-        e.custom
+        e.ai ? reviewActions(e) : e.custom
           ? h(
               "button",
               {
@@ -91,4 +94,42 @@ export function renderGlossary() {
   if (results.length > RENDER_LIMIT) {
     table.append(h("p", { class: "muted small center" }, `Showing ${RENDER_LIMIT} — search to narrow down.`));
   }
+}
+
+/** Review an AI-suggested word: confirm it, fix it, or throw it away. */
+function reviewActions(e) {
+  const wrap = h("div", { class: "review-actions" });
+  wrap.append(
+    h("button", { class: "ghost-btn small grade-easy", title: "Correct — keep permanently", onclick: () => confirmAiWord(e.ko) }, "✓"),
+    h(
+      "button",
+      {
+        class: "ghost-btn small",
+        title: "Fix the meaning or spelling",
+        onclick: () => {
+          const row = wrap.closest(".g-row");
+          const form = h(
+            "form",
+            {
+              class: "inline-form review-edit",
+              onsubmit: async (ev) => {
+                ev.preventDefault();
+                const fd = new FormData(form);
+                await addCustomWord({ ko: fd.get("ko"), en: fd.get("en"), note: fd.get("note"), replaces: e.ko });
+              },
+            },
+            h("input", { name: "ko", value: e.ko, required: true }),
+            h("input", { name: "en", value: e.en, required: true }),
+            h("input", { name: "note", value: "", placeholder: "note (optional)" }),
+            h("button", { class: "pill-btn small", type: "submit" }, "Save as correct")
+          );
+          row.append(form);
+          form.querySelector("[name=en]").focus();
+        },
+      },
+      "Edit"
+    ),
+    h("button", { class: "ghost-btn small grade-again", title: "Wrong — delete", onclick: () => deleteCustomWord(e.ko) }, "✗")
+  );
+  return wrap;
 }

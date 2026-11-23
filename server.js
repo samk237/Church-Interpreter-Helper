@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { distributeEsvText, lookupPassages } from "./lib/scripture-service.js";
 import { formatReference } from "./lib/reference.js";
 import { BOOKS } from "./lib/bible-books.js";
-import { buildTranslatePrompt, cleanModelOutput, isShortTerm } from "./lib/mt-prompt.js";
+import { buildTermPrompt, buildTranslatePrompt, cleanModelOutput, isShortTerm, parseTermResponse } from "./lib/mt-prompt.js";
+import { buildGlossary } from "./lib/glossary.js";
+import { WORD_LISTS } from "./data/word-lists.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -199,7 +201,7 @@ async function fetchEsv(reference) {
 // Machine translation (fallback for words NOT in your lists — always labelled)
 // ---------------------------------------------------------------------------
 app.post("/api/translate", async (req, res) => {
-  const { text, sourceLang, hints } = req.body ?? {};
+  const { text, sourceLang, hints, autosave } = req.body ?? {};
   if (typeof text !== "string" || !text.trim() || !["ko", "en"].includes(sourceLang)) {
     return res.status(400).json({ error: "`text` and `sourceLang` (ko|en) are required." });
   }
@@ -217,8 +219,21 @@ app.post("/api/translate", async (req, res) => {
     try {
       let out = null;
       if (provider === "ollama") out = await translateWithOllama(clean, sourceLang, targetLang, glossaryHints);
-      else if (provider === "libretranslate" && LIBRETRANSLATE_URL) out = await translateWithLibre(clean, sourceLang, targetLang);
-      if (out) return res.json({ translatedText: out, provider: providerLabel(provider) });
+      else if (provider === "libretranslate" && LIBRETRANSLATE_URL) {
+        const t = await translateWithLibre(clean, sourceLang, targetLang);
+        out = t ? { translation: t, corrected: null } : null;
+      }
+      if (!out) continue;
+      const label = providerLabel(provider);
+      const response = { translatedText: out.translation, provider: label, corrected: out.corrected, saved: null, glossaryHit: null };
+
+      // AI spelling fix points at a word you already have => use YOUR entry, save nothing.
+      if (out.corrected && getServerGlossary().get(out.corrected)) {
+        response.glossaryHit = getServerGlossary().get(out.corrected).ko;
+      } else if (autosave && isShortTerm(clean)) {
+        response.saved = saveAiWord({ typed: clean, sourceLang, ...out, provider: label });
+      }
+      return res.json(response);
     } catch (error) {
       errors.push(`${provider}: ${error.message}`);
     }
@@ -257,22 +272,31 @@ function pickOllamaModel(installed) {
 
 async function translateWithOllama(text, sourceLang, targetLang, hints) {
   if (!(await ollamaReachable())) throw new Error("not running");
+  // English single terms: JSON reply so the model can also fix spelling (reliable for English).
+  // Korean single terms: plain short prompt (more accurate; Korean "did you mean" comes from your glossary).
+  const useJson = sourceLang === "en" && isShortTerm(text);
   const r = await fetchWithTimeout(`${OLLAMA_HOST}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: ollamaStatus.model,
-      prompt: buildTranslatePrompt(text, sourceLang, hints),
+      prompt: useJson ? buildTermPrompt(text, sourceLang) : buildTranslatePrompt(text, sourceLang, hints),
+      ...(useJson ? { format: "json" } : {}),
       stream: false,
       keep_alive: OLLAMA_KEEP_ALIVE,
-      options: { temperature: 0, seed: 7, num_predict: isShortTerm(text) ? 32 : 512 },
+      options: { temperature: 0, seed: 7, num_predict: isShortTerm(text) ? 60 : 512 },
     }),
     timeout: OLLAMA_TIMEOUT_MS,
   });
   if (!r.ok) throw new Error(`status ${r.status}`);
-  const out = cleanModelOutput((await r.json())?.response);
+  const raw = (await r.json())?.response;
+  if (useJson) {
+    const parsed = parseTermResponse(raw, text, sourceLang);
+    if (parsed) return parsed;
+  }
+  const out = cleanModelOutput(raw);
   if (!out) throw new Error("empty response");
-  return out;
+  return { translation: out, corrected: null };
 }
 
 /** Load the model into memory ahead of time so the first lookup in a service is fast. */
@@ -332,6 +356,35 @@ function writeCustomWords(words) {
   const tmp = `${CUSTOM_WORDS_FILE}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(words, null, 2) + "\n");
   fs.renameSync(tmp, CUSTOM_WORDS_FILE);
+  serverGlossary = null; // rebuild on next use
+}
+
+// The server knows your glossary too, so AI words are never saved over words you already have.
+let serverGlossary = null;
+function getServerGlossary() {
+  if (!serverGlossary) serverGlossary = buildGlossary(WORD_LISTS, readCustomWords());
+  return serverGlossary;
+}
+
+/** Save an AI answer for a single term as an UNREVIEWED word (status "ai") for later review in the Glossary. */
+function saveAiWord({ typed, sourceLang, translation, corrected, provider }) {
+  const source = corrected ?? typed;
+  const ko = sourceLang === "ko" ? source : translation.split(" / ")[0].trim();
+  const en = sourceLang === "ko" ? translation : source;
+  if (!ko || !en || getServerGlossary().get(ko)) return null;
+  const words = readCustomWords();
+  if (words.some((w) => w.ko === ko)) return null;
+  const word = {
+    ko: ko.slice(0, 80),
+    en: en.slice(0, 200),
+    note: sourceLang === "en" ? `AI (${provider}) from English “${source}”: ${translation}` : `AI (${provider})`,
+    ...(sourceLang === "ko" && corrected ? { alt: [typed] } : {}),
+    status: "ai",
+    addedAt: new Date().toISOString(),
+  };
+  words.push(word);
+  writeCustomWords(words);
+  return word;
 }
 
 const clip = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
@@ -342,15 +395,20 @@ app.post("/api/custom-words", (req, res) => {
   const ko = clip(req.body?.ko, 80);
   const en = clip(req.body?.en, 200);
   const note = clip(req.body?.note, 300);
+  const status = req.body?.status === "ai" ? "ai" : "confirmed";
+  const alt = Array.isArray(req.body?.alt) ? req.body.alt.map((a) => clip(a, 80)).filter(Boolean).slice(0, 5) : undefined;
+  const replaces = clip(req.body?.replaces, 80); // editing a word's Korean spelling
   if (!ko || !en) return res.status(400).json({ error: "Both Korean and English are required." });
-  const words = readCustomWords();
+  let words = readCustomWords();
+  if (replaces && replaces !== ko) words = words.filter((w) => w.ko !== replaces);
   const existing = words.find((w) => w.ko === ko);
+  const now = new Date().toISOString();
   if (existing) {
-    existing.en = en;
-    existing.note = note;
-    existing.updatedAt = new Date().toISOString();
+    Object.assign(existing, { en, note, status, updatedAt: now });
+    if (alt) existing.alt = alt;
+    if (status === "confirmed") existing.reviewedAt = now;
   } else {
-    words.push({ ko, en, note, addedAt: new Date().toISOString() });
+    words.push({ ko, en, note, ...(alt?.length ? { alt } : {}), status, addedAt: now, ...(status === "confirmed" ? { reviewedAt: now } : {}) });
   }
   writeCustomWords(words);
   res.json({ words });
