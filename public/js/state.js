@@ -1,5 +1,6 @@
 import { WORD_LISTS, SCRIPTURE_LISTS } from "/data/word-lists.js";
 import { buildGlossary } from "/lib/glossary.js";
+import { lookupScripture } from "./scripture.js";
 
 // ---------- safe localStorage ----------
 export function load(key, fallback) {
@@ -94,21 +95,16 @@ export function listBadge(id) {
 
 // ---------- API helpers ----------
 export async function fetchScripture(q) {
-  const params = new URLSearchParams({ q });
-  const r = await fetch(`/api/scripture?${params}`);
-  const payload = await r.json();
-  if (!r.ok) throw new Error(payload.error ?? "Passage not found");
-  return payload;
+  return lookupScripture(q);
 }
 
 export async function machineTranslate(text, sourceLang, hints = []) {
   const r = await fetch("/api/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, sourceLang, hints, autosave: true }),
+    body: JSON.stringify({ text, sourceLang, hints }),
   });
-  const payload = await r.json();
-  if (!r.ok) throw new Error(payload.error ?? "Machine translation unavailable");
-  if (payload.saved) await loadCustomWords(); // new AI word is now in the Glossary (for review)
+  const payload = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(payload.error ?? "AI unavailable");
   return payload;
 }

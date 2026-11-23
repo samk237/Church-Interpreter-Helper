@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { lookupPassages, distributeEsvText } from "../lib/scripture-service.js";
+import { lookupPassages, distributeEsvText, applyEsvTexts, expandReferences } from "../lib/scripture-service.js";
+import { VERSE_COUNTS } from "../lib/verse-counts.js";
 import { parseReferences } from "../lib/reference.js";
 import { SCRIPTURE_LISTS, WORD_LISTS } from "../data/word-lists.js";
 
-const load = (id) => JSON.parse(fs.readFileSync(path.join(__dirname, "..", "data", "bible", `${id}.json`), "utf8"));
+const bibleDir = path.join(__dirname, "..", "public", "bible");
+const load = (id) => ({ ...JSON.parse(fs.readFileSync(path.join(bibleDir, id, "meta.json"), "utf8")), books: Array.from({ length: 66 }, (_, i) => JSON.parse(fs.readFileSync(path.join(bibleDir, id, `${i}.json`), "utf8"))) });
 const korean = load("krv");
 const english = load("webu");
 
@@ -42,10 +44,20 @@ describe("lookupPassages", () => {
     expect(r.passages[0].verses.at(-1).verse).toBe(25);
     expect(r.warnings.join(" ")).toMatch(/ends at verse 25/);
   });
-  it("keeps verses the WEB numbers differently (Rom 16:25-27 is still fetched for ESV)", () => {
+  it("keeps verses the WEB numbers differently (Rom 16:25-27 comes from ESV in the app)", () => {
     const r = lookupPassages("Rom 16:25-27", { korean, english });
     expect(r.passages[0].verses).toHaveLength(3);
     expect(r.passages[0].verses[0].ko).toBeTruthy();
+  });
+  it("verse-count table covers every chapter", () => {
+    expect(VERSE_COUNTS).toHaveLength(66);
+    expect(VERSE_COUNTS[18]).toHaveLength(150);
+    expect(VERSE_COUNTS[42][2]).toBe(36);
+  });
+  it("tags verses with their segment and builds ESV labels", () => {
+    const r = lookupPassages("Rom 8:1-2, 28", { korean });
+    expect(r.passages[0].verses.map((v) => v.seg)).toEqual([0, 0, 1]);
+    expect(r.passages[0].segmentLabels).toEqual(["Romans 8:1-2", "Romans 8:28"]);
   });
   it("caps very large requests", () => {
     const r = lookupPassages("Psalms 119", { korean, english, maxVerses: 50 });
@@ -60,7 +72,7 @@ describe("your scripture lists", () => {
         const parsed = parseReferences(ref);
         expect(parsed?.refs.length).toBeGreaterThan(0);
         const r = lookupPassages(ref, { korean, english });
-        expect(r.warnings.filter((w) => !/versification/.test(w))).toEqual([]);
+        expect(r.warnings).toEqual([]);
         expect(r.passages[0].verses.every((v) => v.ko)).toBe(true);
       });
     }
@@ -100,5 +112,16 @@ describe("ESV text distribution", () => {
   });
   it("returns null when nothing lines up", () => {
     expect(distributeEsvText("no markers here", vs([1, 1]))).toBeNull();
+  });
+  it("applies per-segment ESV texts and reports omitted verses", () => {
+    const { passages } = expandReferences({ refs: [{ book: { index: 39, en: "Matthew", ko: "마태복음", chapters: 28 }, segments: [{ startChapter: 17, startVerse: 20, endChapter: 17, endVerse: 22 }] }], errors: [] });
+    const result = applyEsvTexts(passages, ["[20] He said to them [22] As they were gathering"]);
+    expect(result).toEqual({ ok: true, omitted: ["Matthew 17:21"] });
+    expect(passages[0].verses.map((v) => v.en)).toEqual(["He said to them", "", "As they were gathering"]);
+  });
+  it("changes nothing when ESV text can't be aligned", () => {
+    const { passages } = expandReferences({ refs: [{ book: { index: 42, en: "John", ko: "요한복음", chapters: 21 }, segments: [{ startChapter: 3, startVerse: 16, endChapter: 3, endVerse: 16 }] }], errors: [] });
+    expect(applyEsvTexts(passages, ["no markers"]).ok).toBe(false);
+    expect(passages[0].verses[0].en).toBeUndefined();
   });
 });

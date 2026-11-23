@@ -15,3 +15,7 @@ data/custom-words.json.tmp
 
 # phone access code (npm run phone)
 .phone-code
+
+# Cloudflare (website)
+.wrangler/
+.dev.vars*

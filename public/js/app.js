@@ -90,9 +90,15 @@ async function initSettings() {
     $("healthLine").textContent =
       `English: ${health.esv ? "ESV" : "ESV not set up — add ESV_API_KEY to .env.local (offline WEB meanwhile)"}` +
       ` · Korean: 개역한글 (offline)` +
-      ` · AI for new words: ${health.ollama?.reachable ? health.ollama.label : "off — open the Ollama app on the Mac"}`;
+      ` · AI for new words: ${
+        health.ai?.available
+          ? health.ai.label
+          : health.mode === "web"
+            ? "not set up (run npm run web:setup and add a Gemini key)"
+            : "not set up (add GEMINI_API_KEY to .env.local, or open the Ollama app)"
+      }`;
   } catch {
-    $("healthLine").textContent = "Can't reach the helper on the Mac. Is it running (npm start / npm run phone)?";
+    $("healthLine").textContent = "Can't reach the helper server right now.";
   }
 }
 
@@ -101,8 +107,8 @@ async function refreshPhonePanel() {
   const panel = $("phonePanel");
   try {
     const r = await fetch("/api/phone");
-    if (r.status === 403) {
-      panel.hidden = true; // we're on the phone already
+    if (!r.ok) {
+      panel.hidden = true; // on the phone already, or on the website (no phone pairing needed)
       return;
     }
     const info = await r.json();

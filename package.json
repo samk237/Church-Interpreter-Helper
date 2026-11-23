@@ -8,15 +8,21 @@
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
     "build:bibles": "node scripts/build-bibles.mjs",
-    "phone": "node server.js --phone"
+    "phone": "node server.js --phone",
+    "web:build": "node scripts/build-web.mjs",
+    "web:dev": "node scripts/build-web.mjs && wrangler pages dev",
+    "web:setup": "node scripts/web-setup.mjs",
+    "web:deploy": "node scripts/build-web.mjs && wrangler pages deploy --project-name interpreter-helper --branch main --commit-dirty=true"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.12.0",
     "express": "^4.19.2",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "wrangler": "^4.166.0"
   },
   "description": "Deterministic Korean↔English church interpreter companion: your word lists, offline Bible (KRV + WEB/KJV, optional ESV), flashcards.",
   "engines": {

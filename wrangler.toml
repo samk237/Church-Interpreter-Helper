@@ -1,0 +1,13 @@
+# Website version on Cloudflare Pages (free). Set up with: npm run web:setup  (see README → Website)
+name = "interpreter-helper"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "interpreter-helper"
+database_id = "00000000-0000-0000-0000-000000000000" # replaced by npm run web:setup
+
+[ai]
+binding = "AI"

@@ -12,9 +12,21 @@ describe("mt prompt helpers", () => {
     expect(isShortTerm("시기하다")).toBe(true);
   });
   it("parses English spelling corrections", () => {
-    expect(parseTermResponse('{"term":"providence","korean":"섭리"}', "providance", "en")).toEqual({ translation: "섭리", corrected: "providence" });
-    expect(parseTermResponse('{"term":"jubilee","korean":"희년"}', "jubilee", "en")).toEqual({ translation: "희년", corrected: null });
+    expect(parseTermResponse('{"term":"providence","korean":"섭리"}', "providance", "en")).toMatchObject({ translation: "섭리", corrected: "providence" });
+    expect(parseTermResponse('{"term":"jubilee","korean":"희년"}', "jubilee", "en")).toMatchObject({ translation: "희년", corrected: null, suggestions: [] });
     expect(parseTermResponse("not json", "x", "en")).toBeNull();
+  });
+  it("parses Korean did-you-mean suggestions", () => {
+    const r = parseTermResponse(
+      'Sure: ```json\n{"typed_is_standard": false, "suggestions": [{"korean":"구제","english":"almsgiving / relief"},{"korean":"구재","english":"x"}], "english": "almsgiving / relief"}\n```',
+      "구재",
+      "ko"
+    );
+    expect(r).toEqual({ translation: "almsgiving / relief", corrected: "구제", suggestions: [{ term: "구제", translation: "almsgiving / relief" }], typedIsStandard: false });
+  });
+  it("treats a standard Korean word as-is", () => {
+    const r = parseTermResponse('{"typed_is_standard": true, "suggestions": [], "english": "home visitation"}', "심방", "ko");
+    expect(r).toMatchObject({ translation: "home visitation", corrected: null, suggestions: [], typedIsStandard: true });
   });
   it("cleans model output", () => {
     expect(cleanModelOutput('English: "Home visitation"')).toBe("Home visitation");

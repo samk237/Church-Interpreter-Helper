@@ -2,7 +2,23 @@
 
 A Korean ↔ English companion for live church interpreting. It is **deterministic first**: your own word lists decide the answer, the same input always gives the same output, and anything that comes from machine translation is clearly labelled.
 
-## Run it
+## Two ways to run it
+
+You can use either, or both. They share the same app and your same word lists.
+
+| | **Mac mode** (`npm start` / `npm run phone`) | **Website** (Cloudflare, free) |
+|---|---|---|
+| Needs the Mac on | Yes | No — works anywhere on your phone |
+| Your word lists, flashcards, Korean Bible | ✓ | ✓ |
+| ESV | ✓ (your key in `.env.local`) | ✓ (your key stored on Cloudflare) |
+| AI for new words | Local EXAONE on the Mac (private); Gemini first if you add a key | Gemini (free) → Cloudflare's free AI as backup |
+| Korean "did you mean (AI guess)" | Only with a Gemini key | ✓ with a Gemini key |
+| Words you add / AI words to review | `data/custom-words.json` on the Mac | Stored in your Cloudflare database |
+| Privacy | Everything stays on the Mac, unless you add a Gemini key | Password-protected; Gemini's free tier may use lookups to improve Google's products |
+
+The two keep **separate** "added words" lists. `npm run web:setup` can copy the Mac's list to the website.
+
+## Mac mode
 
 ```bash
 npm install
@@ -11,7 +27,7 @@ npm run phone        # also open it on your phone (same Wi-Fi), protected by an 
 npm test
 ```
 
-Optional: copy `.env.local.example` to `.env.local` to add your ESV API key.
+Optional: copy `.env.local.example` to `.env.local` to add your ESV key and/or a Gemini key.
 
 ### Using it on your phone during a service
 
@@ -24,6 +40,22 @@ Things to know:
 - Other people on the Wi-Fi can't open the app without your access code. Wrong guesses are rate-limited. To change the code, delete the `.phone-code` file.
 - Some church Wi-Fi networks block devices from reaching each other. If the phone can't connect, turn on the phone's **Personal Hotspot** and join it from the Mac. ESV still works through the phone's data.
 - `npm start` (the default) can only be opened on the Mac itself.
+
+## Website (Mac off)
+
+One-time setup:
+1. Optional: get a free Gemini key at **https://aistudio.google.com/apikey** → **Create API key**. You can also add it to `.env.local` as `GEMINI_API_KEY=…`, and setup will offer to reuse it.
+2. Run `npm run web:setup`. It will:
+   - open a browser so you can sign in to Cloudflare (or create a free account)
+   - create the database and the website
+   - ask for a **website password**, plus your ESV and Gemini keys
+   - optionally copy the words you added on the Mac
+   - publish the site and print its address (`https://interpreter-helper….pages.dev`)
+3. On your phone, open that address, sign in once, then Share → **Add to Home Screen**.
+
+After you change word lists or code, publish again with `npm run web:deploy`. To test the website locally: `npm run web:dev` (needs a `.dev.vars` file with `APP_PASSWORD=…`).
+
+Everything sits behind your password, including the page, your lists, and the APIs. Wrong passwords are rate-limited. Changing the password (rerun setup) signs every device out.
 
 ### Light / dark mode
 The app follows your device's theme by default. Use the ◐ button (or ⚙ → Theme) to pick System, Light, or Dark.
@@ -51,8 +83,8 @@ All 66 books are supported, with English and Korean names and abbreviations. Ver
 
 | Bible | Source | License |
 |---|---|---|
-| 개역한글 (Korean, 1961) | bundled `data/bible/krv.json` | public domain |
-| World English Bible (Updated) | bundled `data/bible/webu.json` — **emergency fallback only** (no key / no internet), labelled when used | public domain |
+| 개역한글 (Korean, 1961) | bundled `public/bible/krv/` (one file per book) | public domain |
+| World English Bible (Updated) | bundled `public/bible/webu/` — **emergency fallback only** (no key / no internet), labelled when used | public domain |
 | **ESV** — the English shown | real ESV text fetched live from Crossway's official API (set `ESV_API_KEY`) | free for non-commercial use, with the required copyright notice (shown automatically) |
 
 NIV, 개역개정, and BibleGateway text are copyrighted, and there is no free API that permits bundling them, so they are not included. Rebuild the bundled files with `npm run build:bibles -- <download-dir>` (see `scripts/build-bibles.mjs`).
@@ -76,27 +108,34 @@ Search Korean, English, notes, or 초성. Filter by list or ★. Add your own wo
   ```
   `alt` holds other spellings to accept, `note` holds nuance shown in yellow, and `star` adds the word to the Starred deck.
 
-## Machine translation (fallback only)
+## AI for words not in your lists (fallback only)
 
-Machine translation is used only for words that aren't in your lists. It runs locally through **Ollama**: it's free and private, uses temperature 0, and is given your glossary terms so it keeps your wording.
-- Install the Ollama app, then run `ollama pull exaone3.5:7.8b`. This is LG's Korean-specialised model, and the app picks it automatically. If it isn't installed, the app falls back to `qwen2.5:7b`, then `gemma2:9b`, then `llama3`. To force a specific model, set `OLLAMA_MODEL`.
-- If Ollama isn't running, you'll just see *Not in your word lists* with suggestions and **Save as my word**.
-- `LIBRETRANSLATE_URL` with `MT_PROVIDERS=ollama,libretranslate` is optional, if you run your own LibreTranslate instance.
+The AI is used only when your lists don't answer, and its answers are always labelled **🤖 AI suggestion — verify**. Single words are saved to the Glossary as *AI · unreviewed* for you to confirm later.
+
+The app tries these in order, skipping any that aren't set up (change the order with `AI_PROVIDERS`):
+1. **Gemini** (`GEMINI_API_KEY`, free): the best Korean. It also gives the Korean **"Did you mean (AI guess)"** chips when you type a word by ear and misspell it. If one of its guesses is already in your lists, your entry is shown instead.
+2. **Claude** (`ANTHROPIC_API_KEY`, optional and paid): the highest quality.
+3. **On the Mac:** the local model through Ollama (free, private). Run `ollama pull exaone3.5:7.8b` and the app picks it automatically. It doesn't make Korean spelling guesses; it got them wrong too often in testing.
+4. **On the website:** Cloudflare Workers AI (free daily allowance) as the backup.
+
+If no AI is available, you still get *Not in your word lists*, the glossary's own "Did you mean" suggestions, and **Save as my word**.
 
 ## Project layout
 
 ```
-server.js                  Express: serves public/, /lib, word lists; /api/scripture, /api/translate, /api/custom-words
-lib/glossary.js            deterministic lookup / scan / fuzzy / reverse lookup
+server.js                  Mac server (Express): static app, /api/esv, /api/translate, /api/custom-words, phone mode
+functions/                 the same APIs for the website (Cloudflare Pages Functions) + password gate (_middleware.js)
+server/core/               shared by both: ai.js (Gemini/Claude/Workers AI), esv.js, custom-words.js, auth.js
+server/web/                website-only helpers (D1 storage, provider setup); server/schema.sql
+server/phone-access.js     Mac phone mode: access code, unlock page, rate limiting
+lib/glossary.js            deterministic lookup / scan / fuzzy / reverse lookup (runs in the browser)
 lib/korean.js              Hangul helpers (jamo, 초성, particles, conjugation forms)
 lib/reference.js           scripture reference parser (EN + KO)
-lib/bible-books.js         66 books + aliases
-lib/scripture-service.js   passage assembly, versification fallback, ESV text alignment
-lib/mt-prompt.js           prompts for the local AI fallback
-server/phone-access.js     phone mode: access code, unlock page, rate limiting
+lib/scripture-service.js   passage assembly + ESV alignment (browser); lib/verse-counts.js
+lib/mt-prompt.js           AI prompts
 data/word-lists.js         YOUR word lists (incl. Darakbang terms) + scripture lists
-data/custom-words.json     words added from the app
-data/bible/*.json          bundled public-domain Bibles
-public/                    the web app (index.html, styles.css, js/, icons/)
+data/custom-words.json     words added on the Mac
+public/                    the app (index.html, styles.css, js/, icons/, bible/<translation>/<book>.json)
+scripts/                   build-bibles, build-web, web-setup
 tests/                     vitest
 ```

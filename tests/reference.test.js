@@ -64,6 +64,8 @@ describe("parseReferences", () => {
 
   it("looksLikeReference", () => {
     expect(looksLikeReference("행 1:8")).toBe(true);
+    expect(looksLikeReference("Acts 99:1")).toBe(true); // invalid, but clearly a reference → show the error
     expect(looksLikeReference("성령")).toBe(false);
+    expect(looksLikeReference("40주야")).toBe(false);
   });
 });
