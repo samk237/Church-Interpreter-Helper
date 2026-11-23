@@ -40,7 +40,7 @@ async function initSettings() {
     $("healthLine").textContent =
       `English: ${health.esv ? "ESV (api.esv.org)" : "ESV not set up — add ESV_API_KEY to .env.local (offline WEB used meanwhile)"}` +
       ` · Korean: 개역한글 (offline)` +
-      ` · Machine translation: ${health.ollama.reachable ? `Ollama ${health.ollama.model}` : "Ollama off"} → ${health.machineTranslation.filter((p) => p !== "ollama").join(", ") || "none"}`;
+      ` · Machine translation (fallback): ${health.ollama.reachable ? `Ollama ${health.ollama.model}` : "off — start the Ollama app"}`;
   } catch {
     $("healthLine").textContent = "Server not reachable — start it with `npm start`.";
   }

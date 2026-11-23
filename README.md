@@ -59,10 +59,10 @@ Search Korean, English, notes, or 초성. Filter by list or ★. Add your own wo
 
 ## Machine translation (fallback only)
 
-Machine translation is used only for words that aren't in your lists. It tries `MT_PROVIDERS` in order (default `ollama,mymemory`):
-- **Ollama:** a local LLM. It's free and private, uses temperature 0, and is given your glossary terms for that sentence so it keeps your wording.
-- **MyMemory:** a free web API with no key needed. The text you look up is sent to that service.
-- **LibreTranslate:** set `LIBRETRANSLATE_URL` to use your own instance.
+Machine translation is used only for words that aren't in your lists. It runs locally through **Ollama**: it's free and private, uses temperature 0, and is given your glossary terms so it keeps your wording.
+- Install the Ollama app, then run `ollama pull exaone3.5:7.8b`. This is LG's Korean-specialised model, and the app picks it automatically. If it isn't installed, the app falls back to `qwen2.5:7b`, then `gemma2:9b`, then `llama3`. To force a specific model, set `OLLAMA_MODEL`.
+- If Ollama isn't running, you'll just see *Not in your word lists* with suggestions and **Save as my word**.
+- `LIBRETRANSLATE_URL` with `MT_PROVIDERS=ollama,libretranslate` is optional, if you run your own LibreTranslate instance.
 
 ## Project layout
 

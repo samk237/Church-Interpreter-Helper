@@ -19,9 +19,18 @@ for (const file of [".env.local", ".env"]) {
 
 const PORT = Number.parseInt(process.env.PORT ?? "5173", 10);
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
+// If OLLAMA_MODEL isn't set, the best Korean-capable model you have installed is used.
+const OLLAMA_MODEL_PREFERENCE = [
+  process.env.OLLAMA_MODEL,
+  "exaone3.5:7.8b",
+  "exaone3.5",
+  "qwen2.5:7b",
+  "qwen2.5",
+  "gemma2:9b",
+  "llama3",
+].filter(Boolean);
 const OLLAMA_TIMEOUT_MS = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? "20000", 10);
-const MT_PROVIDERS = (process.env.MT_PROVIDERS ?? "ollama,mymemory")
+const MT_PROVIDERS = (process.env.MT_PROVIDERS ?? "ollama")
   .split(",")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
@@ -68,7 +77,7 @@ app.get("/api/health", async (_req, res) => {
     esv: ESV_ENABLED,
     offlineBibles: Object.keys(BIBLES),
     machineTranslation: MT_PROVIDERS,
-    ollama: { host: OLLAMA_HOST, model: OLLAMA_MODEL, reachable: await ollamaReachable() },
+    ollama: { host: OLLAMA_HOST, reachable: await ollamaReachable(), model: ollamaStatus.model, installed: ollamaStatus.installed },
   });
 });
 
@@ -205,7 +214,6 @@ app.post("/api/translate", async (req, res) => {
     try {
       let out = null;
       if (provider === "ollama") out = await translateWithOllama(clean, sourceLang, targetLang, glossaryHints);
-      else if (provider === "mymemory") out = await translateWithMyMemory(clean, sourceLang, targetLang);
       else if (provider === "libretranslate" && LIBRETRANSLATE_URL) out = await translateWithLibre(clean, sourceLang, targetLang);
       if (out) return res.json({ translatedText: out, provider: providerLabel(provider) });
     } catch (error) {
@@ -216,23 +224,32 @@ app.post("/api/translate", async (req, res) => {
 });
 
 function providerLabel(p) {
-  if (p === "ollama") return `Ollama (${OLLAMA_MODEL})`;
-  if (p === "mymemory") return "MyMemory";
+  if (p === "ollama") return `Ollama (${ollamaStatus.model})`;
   if (p === "libretranslate") return "LibreTranslate";
   return p;
 }
 
-let ollamaStatus = { ok: null, checkedAt: 0 };
+let ollamaStatus = { ok: null, checkedAt: 0, model: null, installed: [] };
 async function ollamaReachable() {
   if (/^disabled$/i.test(OLLAMA_HOST)) return false;
   if (Date.now() - ollamaStatus.checkedAt < 60_000 && ollamaStatus.ok !== null) return ollamaStatus.ok;
   try {
     const r = await fetchWithTimeout(`${OLLAMA_HOST}/api/tags`, { timeout: 800 });
-    ollamaStatus = { ok: r.ok, checkedAt: Date.now() };
+    const installed = r.ok ? ((await r.json()).models ?? []).map((m) => m.name) : [];
+    const model = pickOllamaModel(installed);
+    ollamaStatus = { ok: r.ok && Boolean(model), checkedAt: Date.now(), model, installed };
   } catch {
-    ollamaStatus = { ok: false, checkedAt: Date.now() };
+    ollamaStatus = { ok: false, checkedAt: Date.now(), model: null, installed: [] };
   }
   return ollamaStatus.ok;
+}
+
+function pickOllamaModel(installed) {
+  for (const want of OLLAMA_MODEL_PREFERENCE) {
+    const hit = installed.find((name) => name === want || name === `${want}:latest` || name.startsWith(`${want}:`));
+    if (hit) return hit;
+  }
+  return installed[0] ?? null;
 }
 
 async function translateWithOllama(text, sourceLang, targetLang, hints) {
@@ -246,6 +263,7 @@ async function translateWithOllama(text, sourceLang, targetLang, hints) {
     "You are an expert bilingual church interpreter (Korean <-> English) with deep knowledge of Christian and Reformed theological vocabulary.",
     ...glossary,
     `Translate the ${src} text into natural ${tgt} suitable for a church service.`,
+    "Translate faithfully: keep the speaker's exact meaning and sentence. Do NOT replace it with a Bible verse, do NOT add or drop ideas.",
     "Return ONLY the translation — no notes, no quotes, no romanization.",
     "",
     `${src}: ${text}`,
@@ -254,7 +272,7 @@ async function translateWithOllama(text, sourceLang, targetLang, hints) {
   const r = await fetchWithTimeout(`${OLLAMA_HOST}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, options: { temperature: 0, seed: 7, num_predict: 1024 } }),
+    body: JSON.stringify({ model: ollamaStatus.model, prompt, stream: false, options: { temperature: 0, seed: 7, num_predict: 1024 } }),
     timeout: OLLAMA_TIMEOUT_MS,
   });
   if (!r.ok) throw new Error(`status ${r.status}`);
@@ -262,22 +280,6 @@ async function translateWithOllama(text, sourceLang, targetLang, hints) {
   const out = String(payload?.response ?? "").trim();
   if (!out) throw new Error("empty response");
   return out;
-}
-
-async function translateWithMyMemory(text, sourceLang, targetLang) {
-  // Free, no key; ~500 chars per request so translate sentence chunks.
-  const chunks = chunkText(text, 450);
-  const out = [];
-  for (const chunk of chunks) {
-    const url = `https://api.mymemory.translated.net/get?${new URLSearchParams({ q: chunk, langpair: `${sourceLang}|${targetLang}` })}`;
-    const r = await fetchWithTimeout(url, { timeout: 8000 });
-    if (!r.ok) throw new Error(`status ${r.status}`);
-    const payload = await r.json();
-    const t = payload?.responseData?.translatedText;
-    if (!t || payload?.responseStatus >= 400) throw new Error(payload?.responseDetails || "no result");
-    out.push(t);
-  }
-  return out.join(" ").trim();
 }
 
 async function translateWithLibre(text, sourceLang, targetLang) {
@@ -290,25 +292,6 @@ async function translateWithLibre(text, sourceLang, targetLang) {
   if (!r.ok) throw new Error(`status ${r.status}`);
   const payload = await r.json();
   return String(payload?.translatedText ?? "").trim() || null;
-}
-
-function chunkText(text, max) {
-  const sentences = text.split(/(?<=[.!?。…]|다\.|요\.)\s+/);
-  const chunks = [];
-  let cur = "";
-  for (const s of sentences) {
-    if ((cur + " " + s).trim().length > max && cur) {
-      chunks.push(cur.trim());
-      cur = "";
-    }
-    cur += " " + s;
-    while (cur.length > max) {
-      chunks.push(cur.slice(0, max));
-      cur = cur.slice(max);
-    }
-  }
-  if (cur.trim()) chunks.push(cur.trim());
-  return chunks;
 }
 
 async function fetchWithTimeout(url, { timeout = 8000, ...opts } = {}) {
