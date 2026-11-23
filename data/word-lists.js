@@ -9,7 +9,7 @@
  *
  * The same Korean word can appear in several lists — every meaning is kept and shown.
  * To add a new list, copy a block below, give it a new id, and restart `npm start`.
- * (Words you add from the app go to data/custom-words.json instead.)
+ * (Words you add from the app are saved with your data instead — website / data/my-data.json.)
  */
 
 export const WORD_LISTS = [

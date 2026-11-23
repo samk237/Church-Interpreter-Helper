@@ -1,6 +1,7 @@
 import { WORD_LISTS, SCRIPTURE_LISTS } from "/data/word-lists.js";
 import { buildGlossary } from "/lib/glossary.js";
 import { lookupScripture } from "./scripture.js";
+import { getItem, onDataChange, setItem } from "./sync.js";
 
 // ---------- safe localStorage ----------
 export function load(key, fallback) {
@@ -19,16 +20,20 @@ export function save(key, value) {
   }
 }
 
-// ---------- settings ----------
-const SETTINGS_KEY = "cih.settings.v1";
+// ---------- settings (synced across devices; theme and the open tab stay per device) ----------
 export const settings = {
   verseLang: "both",
   autoMt: true,
-  ...load(SETTINGS_KEY, {}),
+  ...getItem("prefs", "settings"),
 };
 export function saveSettings() {
-  save(SETTINGS_KEY, settings);
+  setItem("prefs", "settings", { ...settings });
 }
+onDataChange((changed) => {
+  if (!changed.has("prefs")) return;
+  Object.assign(settings, getItem("prefs", "settings"));
+  document.dispatchEvent(new CustomEvent("settings-changed"));
+});
 
 // ---------- glossary (word lists + custom words) ----------
 let customWords = [];

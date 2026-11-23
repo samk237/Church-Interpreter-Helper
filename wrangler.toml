@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "interpreter-helper"
-database_id = "00000000-0000-0000-0000-000000000000" # replaced by npm run web:setup
+database_id = "d14a984f-fd12-4ee8-8b26-60f33f53996c" # replaced by npm run web:setup
 
 [ai]
 binding = "AI"

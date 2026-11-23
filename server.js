@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
 import { createPhoneGate, formatCode, isLoopback, lanAddresses, loadOrCreateCode } from "./server/phone-access.js";
 import { claudeProvider, DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, geminiProvider, parseTranslateRequest, translateWithProviders } from "./server/core/ai.js";
 import { ESV_INFO, esvKeyUsable, fetchEsvTexts, parseEsvRefs } from "./server/core/esv.js";
-import { removeWord, upsertWord } from "./server/core/custom-words.js";
+import * as dataApi from "./server/core/user-data-api.js";
+import { createFileStore } from "./server/file-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,13 +46,17 @@ const ESV_API_KEY = (process.env.ESV_API_KEY ?? "").trim();
 const ESV_ENABLED = esvKeyUsable(ESV_API_KEY);
 
 const DATA_DIR = path.join(__dirname, "data");
-// Override with CUSTOM_WORDS_FILE=/path/file.json (used by tests / isolated runs).
-const CUSTOM_WORDS_FILE = process.env.CUSTOM_WORDS_FILE ?? path.join(DATA_DIR, "custom-words.json");
+// Your words, flashcard progress, decks, sessions and settings (never committed; `npm run sync` merges it
+// with the website). Override with DATA_FILE=/path/file.json for tests / isolated runs.
+const DATA_FILE = process.env.DATA_FILE ?? path.join(DATA_DIR, "my-data.json");
+const store = createFileStore(DATA_FILE, { legacyWordsFile: process.env.DATA_FILE ? null : path.join(DATA_DIR, "custom-words.json") });
 
 // ---------------------------------------------------------------------------
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json({ limit: "64kb" }));
+const smallJson = express.json({ limit: "64kb" });
+const syncJson = express.json({ limit: "8mb" }); // session transcripts can be large
+app.use((req, res, next) => (req.path === "/api/sync" ? syncJson : smallJson)(req, res, next));
 
 const PHONE_CODE = PHONE_MODE ? loadOrCreateCode(path.join(__dirname, ".phone-code")) : null;
 if (PHONE_MODE) {
@@ -228,37 +233,22 @@ async function fetchWithTimeout(url, { timeout = 8000, ...opts } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Words you add (and AI suggestions to review) -> data/custom-words.json
+// Your data -> data/my-data.json (words, AI words to review, flashcards, decks, sessions, settings)
 // ---------------------------------------------------------------------------
-function readCustomWords() {
+const send = (handler) => async (req, res) => {
   try {
-    const parsed = JSON.parse(fs.readFileSync(CUSTOM_WORDS_FILE, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+    const { status, body } = await handler(req);
+    res.status(status).json(body);
+  } catch (error) {
+    console.error("[data]", error.message);
+    res.status(500).json({ error: `Couldn't read or save your data (${error.message}).` });
   }
-}
-
-function writeCustomWords(words) {
-  const tmp = `${CUSTOM_WORDS_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(words, null, 2) + "\n");
-  fs.renameSync(tmp, CUSTOM_WORDS_FILE);
-}
-
-app.get("/api/custom-words", (_req, res) => res.json({ words: readCustomWords() }));
-
-app.post("/api/custom-words", (req, res) => {
-  const result = upsertWord(readCustomWords(), req.body);
-  if (result.error) return res.status(400).json({ error: result.error });
-  if (result.changed) writeCustomWords(result.words);
-  res.json({ words: result.words });
-});
-
-app.delete("/api/custom-words", (req, res) => {
-  const words = removeWord(readCustomWords(), req.query.ko);
-  writeCustomWords(words);
-  res.json({ words });
-});
+};
+app.get("/api/custom-words", send(() => dataApi.getWords(store)));
+app.post("/api/custom-words", send((req) => dataApi.postWord(store, req.body)));
+app.delete("/api/custom-words", send((req) => dataApi.deleteWord(store, req.query.ko)));
+app.get("/api/sync", send(() => dataApi.getSync(store)));
+app.post("/api/sync", send((req) => dataApi.postSync(store, req.body)));
 
 // ---------------------------------------------------------------------------
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
@@ -289,6 +279,8 @@ if (PHONE_MODE || process.env.HOST) {
 console.log(`Church Interpreter Helper → http://localhost:${PORT}`);
 console.log(`  English: ${ESV_ENABLED ? "ESV (api.esv.org)" : "offline WEB — add ESV_API_KEY to .env.local for ESV"} · Korean: 개역한글 (offline)`);
 console.log(`  AI for new words: ${AI_PROVIDERS.join(" → ") || "none"}`);
+const dataShown = path.relative(__dirname, DATA_FILE);
+console.log(`  Your data: ${dataShown.startsWith("..") ? DATA_FILE : dataShown} (merge with the website: npm run sync)`);
 if (PHONE_MODE) {
   const urls = lanAddresses().map((ip) => `http://${ip}:${PORT}/?key=${PHONE_CODE}`);
   console.log("\n📱 Phone mode — on the same Wi-Fi, scan this or open a link below:");

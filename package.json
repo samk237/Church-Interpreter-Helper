@@ -12,7 +12,8 @@
     "web:build": "node scripts/build-web.mjs",
     "web:dev": "node scripts/build-web.mjs && wrangler pages dev",
     "web:setup": "node scripts/web-setup.mjs",
-    "web:deploy": "node scripts/build-web.mjs && wrangler pages deploy --project-name interpreter-helper --branch main --commit-dirty=true"
+    "web:deploy": "node scripts/build-web.mjs && wrangler pages deploy --project-name interpreter-helper --branch main --commit-dirty=true",
+    "sync": "node scripts/sync.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0",

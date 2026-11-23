@@ -11,7 +11,11 @@ tmp/
 .env.local
 .claude/settings.local.json
 
-data/custom-words.json.tmp
+# your data on the Mac (words, flashcards, sessions) — synced with the website, never committed
+data/my-data.json
+data/my-data.json.tmp
+data/*.imported.json
+data/custom-words.json
 
 # phone access code (npm run phone)
 .phone-code

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { claudeProvider, geminiProvider, parseTranslateRequest, translateWithProviders } from "../server/core/ai.js";
+import { claudeProvider, geminiProvider, parseTranslateRequest, translateWithProviders, workersAiProvider, workersAiText } from "../server/core/ai.js";
 import { upsertWord, removeWord } from "../server/core/custom-words.js";
 import { esvKeyUsable, fetchEsvTexts, parseEsvRefs } from "../server/core/esv.js";
 import { makeSessionToken, passwordMatches, readCookie, verifySessionToken } from "../server/core/auth.js";
@@ -69,6 +69,31 @@ describe("claude provider", () => {
   it("treats a refusal as a failure", async () => {
     const create = vi.fn(async () => ({ stop_reason: "refusal", content: [] }));
     await expect(claudeProvider({ apiKey: "k", client: { beta: { messages: { create } } } }).complete("p")).rejects.toThrow(/declined/);
+  });
+});
+
+describe("workers AI answers", () => {
+  it("reads both the older and the newer (OpenAI-style) answer shapes", () => {
+    expect(workersAiText({ response: "hello" })).toBe("hello");
+    expect(workersAiText({ response: { english: "x" } })).toBe('{"english":"x"}');
+    expect(workersAiText({ id: "1", choices: [{ message: { role: "assistant", content: "성화" } }] })).toBe("성화");
+    expect(workersAiText({ choices: [] })).toBe("");
+  });
+  it("uses Gemma 4 with thinking off, and lets it make Korean spelling guesses", async () => {
+    const run = vi.fn(async () => ({ choices: [{ message: { content: '{"typed_is_standard": false, "suggestions": [{"korean":"긍휼","english":"mercy"}], "english": "mercy"}' } }] }));
+    const p = workersAiProvider({ ai: { run } });
+    expect(p).toMatchObject({ strong: true, label: "Cloudflare AI (Gemma 4)" });
+    const r = await translateWithProviders([p], { text: "궁휼", sourceLang: "ko" });
+    expect(r).toMatchObject({ translatedText: "mercy", corrected: "긍휼" });
+    expect(run.mock.calls[0][0]).toBe("@cf/google/gemma-4-26b-a4b-it");
+    expect(run.mock.calls[0][1].chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+  it("keeps older models (if chosen with WORKERS_AI_MODEL) as translation-only, without the thinking switch", async () => {
+    const run = vi.fn(async () => ({ response: "Providence" }));
+    const p = workersAiProvider({ ai: { run }, model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+    expect(p.strong).toBe(false);
+    await p.complete("x");
+    expect(run.mock.calls[0][1].chat_template_kwargs).toBeUndefined();
   });
 });
 

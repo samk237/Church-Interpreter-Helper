@@ -1,9 +1,7 @@
-import { fetchScripture, getGlossary, load, save, scriptureLists, wordLists } from "./state.js";
+import { fetchScripture, getGlossary, scriptureLists, wordLists } from "./state.js";
+import { getAll, getItem, onDataChange, setItem } from "./sync.js";
 import { h, renderEntry, renderPassages } from "./dom.js";
 
-const PROGRESS_KEY = "cih.progress.v1";
-const DECKS_KEY = "cih.decks.v1";
-const STUDY_KEY = "cih.study.v1";
 const ROUND_SIZE = 25;
 const MASTERED_BOX = 3;
 
@@ -12,8 +10,11 @@ const deckSelect = $("deckSelect");
 const directionSelect = $("directionSelect");
 const stage = $("cardStage");
 
-let progress = load(PROGRESS_KEY, {});
-const prefs = { deck: "star", direction: "ko-en", ...load(STUDY_KEY, {}) };
+// Progress, saved decks and these choices are synced across devices (see sync.js).
+let progress = getAll("progress");
+const prefs = { deck: "star", direction: "ko-en", ...getItem("prefs", "study") };
+const savePrefs = () => setItem("prefs", "study", { ...prefs });
+const savedDecks = () => Object.values(getAll("decks")).sort((a, b) => String(a.id).localeCompare(String(b.id)));
 let round = null; // { queue: Card[], total, again: Set, done: number }
 let current = null; // { card, dir, flipped }
 let active = false;
@@ -22,17 +23,27 @@ export function initStudy() {
   directionSelect.value = prefs.direction;
   deckSelect.addEventListener("change", () => {
     prefs.deck = deckSelect.value;
-    save(STUDY_KEY, prefs);
+    savePrefs();
     startRound();
   });
   directionSelect.addEventListener("change", () => {
     prefs.direction = directionSelect.value;
-    save(STUDY_KEY, prefs);
+    savePrefs();
     startRound();
   });
   $("restartDeckBtn").addEventListener("click", () => startRound());
   document.addEventListener("decks-changed", populateDecks);
   document.addEventListener("keydown", onKey);
+  // Another device studied or saved a deck: refresh counts and the deck list (the current card stays put).
+  onDataChange((changed) => {
+    if (changed.has("progress")) progress = getAll("progress");
+    if (changed.has("prefs") && !active) {
+      Object.assign(prefs, getItem("prefs", "study"));
+      directionSelect.value = prefs.direction;
+    }
+    if (changed.has("decks") || changed.has("prefs")) populateDecks();
+    if (changed.has("progress") && round) renderProgress();
+  });
   populateDecks();
 }
 
@@ -48,7 +59,7 @@ export function refreshStudy() {
 // ---------------------------------------------------------------------------
 function populateDecks() {
   const g = getGlossary();
-  const saved = load(DECKS_KEY, []);
+  const saved = savedDecks();
   const options = [
     ["star", `★ Starred (${g.entries.filter((e) => e.star).length})`],
     ["review", "Needs review (missed before)"],
@@ -83,7 +94,7 @@ function deckCards(deckId) {
     return (list?.passages ?? []).map(scriptureCard);
   }
   if (deckId.startsWith("deck:")) {
-    const d = load(DECKS_KEY, []).find((x) => `deck:${x.id}` === deckId);
+    const d = savedDecks().find((x) => `deck:${x.id}` === deckId);
     return (d?.words ?? []).map((ko) => g.get(ko)).filter((e) => e && !e.ai).map(word);
   }
   return [];
@@ -145,7 +156,7 @@ function grade(level) {
     round.right += 1;
   }
   progress[card.id] = p;
-  save(PROGRESS_KEY, progress);
+  setItem("progress", card.id, p);
   next();
 }
 

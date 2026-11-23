@@ -102,8 +102,19 @@ export function renderPassages(payload, { compact = false } = {}) {
   }
   if (!compact) {
     for (const w of payload.warnings ?? []) wrap.append(h("div", { class: "note" }, w));
-    const credits = [payload.english, payload.korean].filter(Boolean).map((t) => `${t.short}: ${t.credit}`);
-    wrap.append(h("div", { class: "credit" }, credits.join("  ·  ")));
+    const credits = [payload.english, payload.korean].filter(Boolean);
+    wrap.append(
+      h(
+        "div",
+        { class: "credit" },
+        credits.flatMap((t, i) => [
+          i ? "  ·  " : null,
+          `${t.short}: ${t.credit}`,
+          t.url ? " " : null,
+          t.url ? h("a", { href: t.url, target: "_blank", rel: "noopener" }, t.url.replace(/^https?:\/\//, "")) : null,
+        ])
+      )
+    );
   }
   return wrap;
 }

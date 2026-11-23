@@ -7,6 +7,7 @@ export const ESV_INFO = {
   short: "ESV",
   name: "English Standard Version",
   language: "en",
+  url: "https://www.esv.org", // ESV API terms: link to esv.org wherever ESV text is shown
   credit:
     "Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard Version®), © 2001 by Crossway, a publishing ministry of Good News Publishers. Used by permission. All rights reserved.",
 };

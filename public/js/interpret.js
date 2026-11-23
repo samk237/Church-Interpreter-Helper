@@ -1,10 +1,9 @@
 import { looksLikeReference, parseReferences, formatReference } from "/lib/reference.js";
 import { addCustomWord, confirmAiWord, fetchScripture, getGlossary, load, machineTranslate, save, settings } from "./state.js";
+import { getAll, onDataChange, removeItem, setItem } from "./sync.js";
 import { isShortTerm } from "/lib/mt-prompt.js";
 import { download, h, renderEntry, renderPassages, snapshot } from "./dom.js";
 
-const STORAGE_KEY = "cih.sessions.v1";
-const DECKS_KEY = "cih.decks.v1";
 // Up to about one sentence is translated automatically; longer text gets a button (use Claude for paragraphs).
 const AUTO_MT_MAX_CHARS = 200;
 
@@ -15,14 +14,17 @@ const chatInput = $("chatInput");
 const liveSuggest = $("liveSuggest");
 const sessionDialog = $("sessionDialog");
 
-let sessions = load(STORAGE_KEY, []).map((s) => ({ ...s, transcript: s.transcript ?? [] }));
-let activeSessionId = load("cih.activeSession", null) ?? sessions[sessions.length - 1]?.id ?? null;
+// Sessions are synced across devices (see sync.js); which one is open is remembered per device.
+const loadSessions = () =>
+  Object.values(getAll("sessions"))
+    .map((s) => Object.assign(s, { transcript: s.transcript ?? [] }))
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+let sessions = loadSessions();
+let activeSessionId = load("cih.activeSession", null);
 if (!sessions.some((s) => s.id === activeSessionId)) activeSessionId = sessions[sessions.length - 1]?.id ?? null;
 
-const saveSessions = () => {
-  save(STORAGE_KEY, sessions);
-  save("cih.activeSession", activeSessionId);
-};
+const saveSession = (s) => s && setItem("sessions", s.id, s);
+const sessionOf = (msg) => sessions.find((s) => s.transcript.includes(msg)) ?? activeSession();
 const activeSession = () => sessions.find((s) => s.id === activeSessionId) ?? null;
 
 export function initInterpret() {
@@ -49,6 +51,13 @@ export function initInterpret() {
   $("sessionScripture").addEventListener("click", () => {
     const s = activeSession();
     if (s?.scripture) submit(s.scripture);
+  });
+  // Sessions from another device (or this one, last time) arrived: show them.
+  onDataChange((changed) => {
+    if (!changed.has("sessions")) return;
+    sessions = loadSessions();
+    if (!sessions.some((s) => s.id === activeSessionId)) activeSessionId = sessions[sessions.length - 1]?.id ?? null;
+    renderAll();
   });
   renderAll();
   if (!activeSessionId) openSessionDialog();
@@ -141,7 +150,7 @@ async function runMt(data, bubble, msg) {
   }
   fillBubble(bubble, data);
   msg.text = plainLookup(data);
-  saveSessions();
+  saveSession(sessionOf(msg));
 }
 
 /** Single-word AI answers go to the Glossary as "AI · unreviewed" so you can check them later. */
@@ -369,10 +378,9 @@ function saveWordControls(data, open = false) {
 
 function makeDeck(data, button) {
   const s = activeSession();
-  const decks = load(DECKS_KEY, []);
   const title = `${s?.title ?? "Scan"} — ${new Date().toLocaleDateString()}`;
-  decks.push({ id: `deck-${Date.now()}`, title, words: data.found.map((f) => f.entry.ko) });
-  save(DECKS_KEY, decks);
+  const id = `deck-${Date.now()}`;
+  setItem("decks", id, { id, title, words: data.found.map((f) => f.entry.ko) });
   button.textContent = `✓ Deck saved: “${title}” (Flashcards tab)`;
   button.disabled = true;
   document.dispatchEvent(new CustomEvent("decks-changed"));
@@ -421,7 +429,7 @@ function persist(msg) {
   const stored = { ...msg, timestamp: Date.now() };
   if (s) {
     s.transcript.push(stored);
-    saveSessions();
+    saveSession(s);
   }
   return stored;
 }
@@ -519,9 +527,9 @@ function renderSessionList() {
                 e.stopPropagation();
                 if (!confirm(`Delete “${s.title}” and its history?`)) return;
                 sessions = sessions.filter((x) => x.id !== s.id);
-                if (activeSessionId === s.id) activeSessionId = sessions[sessions.length - 1]?.id ?? null;
-                saveSessions();
-                renderAll();
+                removeItem("sessions", s.id);
+                if (activeSessionId === s.id) setActive(sessions[sessions.length - 1]?.id ?? null);
+                else renderAll();
               },
             },
             "Delete"
@@ -539,7 +547,7 @@ function renderAll() {
 
 function setActive(id) {
   activeSessionId = id;
-  saveSessions();
+  save("cih.activeSession", activeSessionId);
   renderAll();
 }
 
@@ -553,6 +561,7 @@ function createSession({ title, scripture = "", speaker = "" }) {
     createdAt: Date.now(),
   };
   sessions.push(s);
+  saveSession(s);
   setActive(s.id);
   return s;
 }

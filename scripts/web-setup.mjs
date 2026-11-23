@@ -2,9 +2,9 @@
 /**
  * One-time setup of the website (Cloudflare Pages, free plan):
  *   1. sign in to Cloudflare (browser)          4. set secrets: password, ESV key, Gemini key
- *   2. create the D1 database + tables          5. copy your added words from data/custom-words.json
- *   3. create the Pages project                 6. build + deploy → prints your URL
- * Safe to run again (skips what already exists; secrets you leave blank are kept).
+ *   2. create the D1 database + tables          5. build + deploy → prints your URL
+ *   3. create the Pages project                 6. merge this Mac's data with the website (npm run sync)
+ * Safe to run again (skips what already exists; secrets you leave blank are kept). Rerun it to change the password.
  *
  *   npm run web:setup
  */
@@ -111,31 +111,8 @@ const geminiLocal = localEnv("GEMINI_API_KEY");
 const gemini = geminiLocal && (await ask("  Use the Gemini key from .env.local? [Y/n] ")).toLowerCase() !== "n" ? geminiLocal : await ask("  Gemini API key from aistudio.google.com/apikey (blank = skip): ", { hidden: true });
 if (gemini) putSecret("GEMINI_API_KEY", gemini);
 
-// 5. Copy words added on the Mac
-console.log("\nStep 5: words you added on the Mac");
-let words = [];
-try {
-  words = JSON.parse(fs.readFileSync(path.join(root, "data", "custom-words.json"), "utf8"));
-} catch {
-  /* none */
-}
-if (Array.isArray(words) && words.length) {
-  const answer = (await ask(`  Copy ${words.length} word(s) from data/custom-words.json to the website (replaces the website's list)? [y/N] `)).toLowerCase();
-  if (answer === "y") {
-    const sql = `INSERT INTO store (key, value, updated_at) VALUES ('custom-words', '${JSON.stringify(words).replace(/'/g, "''")}', '${new Date().toISOString()}') ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`;
-    const tmp = path.join(root, ".wrangler-import.sql");
-    fs.writeFileSync(tmp, sql);
-    const r = wrangler(["d1", "execute", DB_NAME, "--remote", "--file", tmp, "-y"], { capture: true });
-    fs.rmSync(tmp, { force: true });
-    if (r.status !== 0) fail("Couldn't copy the words.", r);
-    console.log("  copied ✓");
-  }
-} else {
-  console.log("  none to copy");
-}
-
-// 6. Deploy
-console.log("\nStep 6: publishing the website…");
+// 5. Deploy
+console.log("\nStep 5: publishing the website…");
 spawnSync("node", ["scripts/build-web.mjs"], { cwd: root, stdio: "inherit" });
 const deploy = wrangler(["pages", "deploy", "--project-name", PROJECT, "--branch", "main", "--commit-dirty=true"], { capture: true });
 process.stdout.write(deploy.stdout ?? "");
@@ -143,5 +120,12 @@ if (deploy.status !== 0) fail("Deploy failed.", deploy);
 // The site lives at <project>.pages.dev (Cloudflare adds a suffix if that name was taken).
 const listing = wrangler(["pages", "project", "list"], { capture: true }).stdout ?? "";
 const domain = listing.match(new RegExp(`${PROJECT}[\\w-]*\\.pages\\.dev`))?.[0] ?? `${PROJECT}.pages.dev`;
+
+// 6. Merge the Mac's data (words, AI words to review, flashcards, decks, sessions) with the website's.
+console.log("\nStep 6: your saved data");
+const merge = (await ask("  Merge this Mac's saved words, flashcards and sessions with the website now? (nothing is deleted) [Y/n] ")).toLowerCase();
+if (merge !== "n") spawnSync("node", ["scripts/sync.mjs"], { cwd: root, stdio: "inherit" });
+else console.log("  skipped — run npm run sync any time");
+
 console.log(`\n✓ Done. Open https://${domain} on your phone, sign in once, then Share → Add to Home Screen.`);
-console.log("  Later updates: npm run web:deploy");
+console.log("  Later updates: npm run web:deploy   ·   Merge with the Mac: npm run sync");

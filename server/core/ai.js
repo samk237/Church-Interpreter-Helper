@@ -3,7 +3,7 @@
  * Providers are tried in order until one answers:
  *   - Gemini (Google, free tier)          GEMINI_API_KEY   — strong Korean; free-tier input may be used by Google
  *   - Claude (Anthropic, paid, optional)  ANTHROPIC_API_KEY
- *   - Workers AI (Cloudflare, free tier)  website only (binding)
+ *   - Workers AI (Cloudflare, free tier)  website only (binding) — Gemma 4 by default
  *   - Ollama (local, Mac only)            defined in server.js
  * "strong" providers are also asked for Korean "did you mean" suggestions.
  */
@@ -11,7 +11,9 @@ import { buildTermPrompt, buildTranslatePrompt, cleanModelOutput, isShortTerm, p
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 export const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
-export const DEFAULT_WORKERS_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+// Website backup. Chosen over Llama 3.3 70B in a side-by-side test (2026-11-23): better Korean church terms,
+// clean English→Korean (Llama garbled it), and ~2 neurons per lookup vs ~26 (free plan: 10,000/day).
+export const DEFAULT_WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
 async function fetchWithTimeout(fetchImpl, url, init, timeoutMs) {
   const controller = new AbortController();
@@ -93,14 +95,34 @@ export function claudeProvider({ apiKey, model = DEFAULT_CLAUDE_MODEL, client = 
 }
 
 /** Cloudflare Workers AI (website only; `ai` is the env.AI binding). */
+/** Workers AI models answer either { response } (older) or OpenAI-style { choices: [{ message }] } (newer). */
+export function workersAiText(r) {
+  if (typeof r === "string") return r;
+  if (typeof r?.response === "string") return r.response;
+  if (r?.response && typeof r.response === "object") return JSON.stringify(r.response);
+  const content = r?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content : "";
+}
+
+// Models that "think" before answering by default; thinking off = faster, ~10x cheaper, and it can't eat the answer's token budget.
+const THINKING_MODEL = /gemma-4|qwen3/i;
+// Models that passed the Korean "did you mean" test (2026-11-23: caught 구재→구제 and 궁휼→긍휼, no false corrections).
+const STRONG_WORKERS_MODEL = /gemma-4/i;
+
 export function workersAiProvider({ ai, model = DEFAULT_WORKERS_AI_MODEL }) {
+  const name = /gemma-4/i.test(model) ? "Gemma 4" : /llama/i.test(model) ? "Llama" : "";
   return {
     id: "workers-ai",
-    label: "Cloudflare Workers AI",
-    strong: false,
+    label: name ? `Cloudflare AI (${name})` : "Cloudflare Workers AI",
+    strong: STRONG_WORKERS_MODEL.test(model),
     async complete(prompt, { maxTokens = 512 } = {}) {
-      const r = await ai.run(model, { messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0 });
-      const text = typeof r === "string" ? r : typeof r?.response === "string" ? r.response : JSON.stringify(r?.response ?? "");
+      const r = await ai.run(model, {
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: maxTokens,
+        temperature: 0,
+        ...(THINKING_MODEL.test(model) ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+      });
+      const text = workersAiText(r);
       if (!text.trim()) throw new Error("Workers AI returned no text");
       return text;
     },

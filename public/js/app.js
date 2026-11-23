@@ -3,6 +3,7 @@ import { initInterpret } from "./interpret.js";
 import { initStudy, refreshStudy, setStudyActive } from "./study.js";
 import { initGlossaryView, renderGlossary } from "./glossary-view.js";
 import { h } from "./dom.js";
+import { onSyncStatus, startSync, syncStatus } from "./sync.js";
 
 const $ = (id) => document.getElementById(id);
 const VIEWS = ["interpret", "study", "glossary"];
@@ -85,8 +86,17 @@ async function initSettings() {
     saveSettings();
   });
 
+  // Changed on another device.
+  document.addEventListener("settings-changed", () => {
+    verseLang.value = settings.verseLang;
+    autoMt.checked = settings.autoMt;
+    document.querySelectorAll(".verses").forEach((el) => (el.className = `verses lang-${settings.verseLang}`));
+  });
+
   try {
     const health = await fetch("/api/health").then((r) => r.json());
+    dataHome = health.mode === "web" ? "web" : "mac";
+    renderSyncLine();
     $("healthLine").textContent =
       `English: ${health.esv ? "ESV" : "ESV not set up — add ESV_API_KEY to .env.local (offline WEB meanwhile)"}` +
       ` · Korean: 개역한글 (offline)` +
@@ -101,6 +111,27 @@ async function initSettings() {
     $("healthLine").textContent = "Can't reach the helper server right now.";
   }
 }
+
+// ---------- where your data lives ----------
+let dataHome = null;
+function renderSyncLine() {
+  const s = syncStatus();
+  const when = s.at ? new Date(s.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const where =
+    dataHome === "web"
+      ? "Your words, AI words to review, flashcards, decks and sessions are saved on your website and shared by every device you sign in on."
+      : dataHome === "mac"
+        ? "Your words, AI words to review, flashcards, decks and sessions are saved on this Mac (data/my-data.json). Run npm run sync to merge them with the website."
+        : "";
+  const state =
+    s.state === "synced"
+      ? `✓ Up to date${when ? ` (${when})` : ""}`
+      : s.state === "offline"
+        ? `Offline — ${s.pending ? `${s.pending} change(s) will be saved` : "changes will be saved"} when the connection is back.`
+        : "";
+  $("syncLine").textContent = [where, state].filter(Boolean).join(" ");
+}
+onSyncStatus(renderSyncLine);
 
 /** "Use on your phone" section — only the Mac itself can see the code/QR. */
 async function refreshPhonePanel() {
@@ -166,6 +197,7 @@ initInterpret();
 initStudy();
 initGlossaryView();
 loadCustomWords();
+startSync(loadCustomWords); // also refreshes words when the app comes back to the front
 
 const initialView = load("cih.view", "interpret");
 showView(VIEWS.includes(initialView) ? initialView : "interpret");
