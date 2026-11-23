@@ -1,213 +1,382 @@
 import express from "express";
-import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { distributeEsvText, lookupPassages } from "./lib/scripture-service.js";
+import { formatReference } from "./lib/reference.js";
+import { BOOKS } from "./lib/bible-books.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Optional local config (ESV_API_KEY, OLLAMA_MODEL, ...). Never committed.
+for (const file of [".env.local", ".env"]) {
+  try {
+    process.loadEnvFile(path.join(__dirname, file));
+  } catch {
+    /* file not present */
+  }
+}
 
 const PORT = Number.parseInt(process.env.PORT ?? "5173", 10);
-const STATIC_ROOT = process.env.STATIC_ROOT ?? __dirname;
-
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
-const OLLAMA_TIMEOUT_MS = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? "15000", 10);
-const FALLBACK_TRANSLATE_URL =
-  process.env.FALLBACK_TRANSLATE_URL ?? "https://libretranslate.de/translate";
+const OLLAMA_TIMEOUT_MS = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? "20000", 10);
+const MT_PROVIDERS = (process.env.MT_PROVIDERS ?? "ollama,mymemory")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL ?? "";
+const ESV_API_KEY = (process.env.ESV_API_KEY ?? "").trim();
+const ESV_ENABLED = ESV_API_KEY.length > 0 && !/your_esv/i.test(ESV_API_KEY);
 
+const DATA_DIR = path.join(__dirname, "data");
+const CUSTOM_WORDS_FILE = path.join(DATA_DIR, "custom-words.json");
+
+// ---------------------------------------------------------------------------
+// Bibles (public domain, bundled) — loaded once at startup
+// ---------------------------------------------------------------------------
+function loadBible(id) {
+  const file = path.join(DATA_DIR, "bible", `${id}.json`);
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+// krv = Korean text. webu = offline English used only when ESV is unavailable (no key / no internet).
+const BIBLES = Object.fromEntries(["krv", "webu"].map((id) => [id, loadBible(id)]).filter(([, b]) => b));
+
+const ESV_INFO = {
+  id: "esv",
+  short: "ESV",
+  name: "English Standard Version",
+  language: "en",
+  credit:
+    "Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard Version®), © 2001 by Crossway, a publishing ministry of Good News Publishers. Used by permission. All rights reserved.",
+};
+
+// ---------------------------------------------------------------------------
 const app = express();
-app.use(cors());
-app.use(express.json());
-app.use(express.static(STATIC_ROOT, { extensions: ["html"] }));
+app.disable("x-powered-by");
+app.use(express.json({ limit: "64kb" }));
 
-app.get("/api/health", (_req, res) => {
+// Only expose what the browser needs (NOT the project root).
+app.use(express.static(path.join(__dirname, "public")));
+app.use("/lib", express.static(path.join(__dirname, "lib")));
+app.get("/data/word-lists.js", (_req, res) => res.sendFile(path.join(DATA_DIR, "word-lists.js")));
+
+app.get("/api/health", async (_req, res) => {
   res.json({
     status: "ok",
-    ollamaHost: OLLAMA_HOST,
-    ollamaModel: OLLAMA_MODEL,
-    fallback: FALLBACK_TRANSLATE_URL,
+    esv: ESV_ENABLED,
+    offlineBibles: Object.keys(BIBLES),
+    machineTranslation: MT_PROVIDERS,
+    ollama: { host: OLLAMA_HOST, model: OLLAMA_MODEL, reachable: await ollamaReachable() },
   });
 });
 
-app.post("/api/translate", async (req, res) => {
-  const { text, sourceLang } = req.body ?? {};
-  if (!text || !sourceLang) {
-    return res.status(400).json({ error: "`text` and `sourceLang` are required." });
+// ---------------------------------------------------------------------------
+// Scripture: Korean from bundled 개역한글, English from the official ESV API
+// ---------------------------------------------------------------------------
+const esvCache = new Map();
+
+app.get("/api/scripture", async (req, res) => {
+  const q = String(req.query.q ?? "").slice(0, 300);
+  const korean = BIBLES.krv;
+  const offlineEnglish = BIBLES.webu;
+
+  const result = lookupPassages(q, { korean, english: offlineEnglish });
+  if (!result) return res.status(400).json({ error: "That doesn't look like a scripture reference." });
+  if (result.passages.length === 0) {
+    return res.status(404).json({ error: result.warnings.join(" ") || "Passage not found." });
   }
+  // Versification notes about the offline English don't matter when ESV is used
+  let warnings = result.warnings;
+  let english = pick(offlineEnglish);
 
-  const targetLang = sourceLang === "ko" ? "en" : "ko";
-
-  try {
-    const llmResult = await translateWithOllama(text, sourceLang, targetLang);
-    if (llmResult) {
-      console.log(`[translator] Ollama ${sourceLang}->${targetLang} success.`);
-      return res.json({ translatedText: llmResult, provider: "ollama" });
+  if (ESV_ENABLED) {
+    try {
+      const esvTexts = [];
+      for (const p of result.passages) esvTexts.push(await fetchEsvForPassage(p));
+      const omitted = [];
+      result.passages.forEach((p, i) =>
+        p.verses.forEach((v, j) => {
+          const t = esvTexts[i][j];
+          v.en = t ?? "";
+          if (t === undefined) omitted.push(`${p.book.en} ${v.chapter}:${v.verse}`);
+        })
+      );
+      english = ESV_INFO;
+      warnings = warnings.filter((w) => !/versification/.test(w));
+      if (omitted.length) warnings.push(`${omitted.join(", ")}: not in the ESV main text (footnote only).`);
+    } catch (error) {
+      console.warn("[scripture] ESV failed, using offline WEB:", error.message);
+      warnings.push(`ESV unavailable (${error.message}) — English shown from the offline WEB.`);
     }
-  } catch (error) {
-    console.warn("[translator] Ollama translation failed:", error.message);
+  } else {
+    warnings.push("English is from the offline WEB. Add ESV_API_KEY to .env.local for ESV.");
   }
 
+  res.json({ passages: result.passages, warnings, korean: pick(korean), english });
+});
+
+function pick(bible) {
+  if (!bible) return null;
+  const { id, short, name, language, credit } = bible;
+  return { id, short, name, language, credit };
+}
+
+/** Returns an array of ESV verse texts aligned to passage.verses (undefined = not in ESV main text). */
+async function fetchEsvForPassage(passage) {
+  const out = new Array(passage.verses.length);
+  let offset = 0;
+  for (const segment of passage.segments) {
+    const count = countSegmentVerses(passage, offset, segment);
+    const slice = passage.verses.slice(offset, offset + count);
+    if (slice.length) {
+      const label = formatReference({ book: BOOKS[passage.book.index], segments: [segment] }, "en");
+      const texts = distributeEsvText(await fetchEsv(label), slice);
+      if (!texts) throw new Error("could not read ESV verse numbers");
+      texts.forEach((t, k) => (out[offset + k] = t));
+    }
+    offset += count;
+  }
+  return out;
+}
+
+function countSegmentVerses(passage, offset, segment) {
+  let n = 0;
+  for (let i = offset; i < passage.verses.length; i += 1) {
+    const v = passage.verses[i];
+    const afterStart = v.chapter > segment.startChapter || (v.chapter === segment.startChapter && (segment.startVerse === null || v.verse >= segment.startVerse));
+    const beforeEnd = v.chapter < segment.endChapter || (v.chapter === segment.endChapter && (segment.endVerse === null || v.verse <= segment.endVerse));
+    if (afterStart && beforeEnd) n += 1;
+    else break;
+  }
+  return n;
+}
+
+async function fetchEsv(reference) {
+  if (esvCache.has(reference)) return esvCache.get(reference);
+  const params = new URLSearchParams({
+    q: reference,
+    "include-passage-references": "false",
+    "include-verse-numbers": "true",
+    "include-first-verse-numbers": "true",
+    "include-footnotes": "false",
+    "include-footnote-body": "false",
+    "include-headings": "false",
+    "include-short-copyright": "false",
+    "include-copyright": "false",
+    "include-selahs": "true",
+    "indent-paragraphs": "0",
+    "indent-poetry": "false",
+    "line-length": "0",
+  });
+  const response = await fetchWithTimeout(`https://api.esv.org/v3/passage/text/?${params}`, {
+    headers: { Authorization: `Token ${ESV_API_KEY}` },
+    timeout: 8000,
+  });
+  if (!response.ok) throw new Error(`ESV API status ${response.status}`);
+  const payload = await response.json();
+  const text = (payload.passages ?? []).join(" ");
+  if (!text.trim()) throw new Error("ESV returned no text");
+  esvCache.set(reference, text);
+  if (esvCache.size > 300) esvCache.delete(esvCache.keys().next().value);
+  return text;
+}
+
+// ---------------------------------------------------------------------------
+// Machine translation (fallback for words NOT in your lists — always labelled)
+// ---------------------------------------------------------------------------
+app.post("/api/translate", async (req, res) => {
+  const { text, sourceLang, hints } = req.body ?? {};
+  if (typeof text !== "string" || !text.trim() || !["ko", "en"].includes(sourceLang)) {
+    return res.status(400).json({ error: "`text` and `sourceLang` (ko|en) are required." });
+  }
+  const clean = text.trim().slice(0, 2000);
+  const targetLang = sourceLang === "ko" ? "en" : "ko";
+  const glossaryHints = Array.isArray(hints)
+    ? hints
+        .filter((h) => h && typeof h.ko === "string" && typeof h.en === "string")
+        .slice(0, 40)
+        .map((h) => ({ ko: h.ko.slice(0, 80), en: h.en.slice(0, 160) }))
+    : [];
+
+  const errors = [];
+  for (const provider of MT_PROVIDERS) {
+    try {
+      let out = null;
+      if (provider === "ollama") out = await translateWithOllama(clean, sourceLang, targetLang, glossaryHints);
+      else if (provider === "mymemory") out = await translateWithMyMemory(clean, sourceLang, targetLang);
+      else if (provider === "libretranslate" && LIBRETRANSLATE_URL) out = await translateWithLibre(clean, sourceLang, targetLang);
+      if (out) return res.json({ translatedText: out, provider: providerLabel(provider) });
+    } catch (error) {
+      errors.push(`${provider}: ${error.message}`);
+    }
+  }
+  res.status(502).json({ error: "No machine translation available.", detail: errors.join("; ") });
+});
+
+function providerLabel(p) {
+  if (p === "ollama") return `Ollama (${OLLAMA_MODEL})`;
+  if (p === "mymemory") return "MyMemory";
+  if (p === "libretranslate") return "LibreTranslate";
+  return p;
+}
+
+let ollamaStatus = { ok: null, checkedAt: 0 };
+async function ollamaReachable() {
+  if (/^disabled$/i.test(OLLAMA_HOST)) return false;
+  if (Date.now() - ollamaStatus.checkedAt < 60_000 && ollamaStatus.ok !== null) return ollamaStatus.ok;
   try {
-    const fallbackResult = await translateWithFallback(text, sourceLang, targetLang);
-    console.log(`[translator] Fallback ${sourceLang}->${targetLang} used.`);
-    return res.json({ translatedText: fallbackResult, provider: "fallback" });
-  } catch (error) {
-    console.error("[translator] Fallback translation failed:", error);
-    return res.status(502).json({
-      error: "All translation providers failed.",
-      detail: error.message ?? "Unknown error",
-    });
+    const r = await fetchWithTimeout(`${OLLAMA_HOST}/api/tags`, { timeout: 800 });
+    ollamaStatus = { ok: r.ok, checkedAt: Date.now() };
+  } catch {
+    ollamaStatus = { ok: false, checkedAt: Date.now() };
   }
+  return ollamaStatus.ok;
+}
+
+async function translateWithOllama(text, sourceLang, targetLang, hints) {
+  if (!(await ollamaReachable())) throw new Error("not running");
+  const src = sourceLang === "ko" ? "Korean" : "English";
+  const tgt = targetLang === "ko" ? "Korean" : "English";
+  const glossary = hints.length
+    ? ["Use EXACTLY these glossary translations where they appear:", ...hints.map((h) => `- ${h.ko} = ${h.en}`), ""]
+    : [];
+  const prompt = [
+    "You are an expert bilingual church interpreter (Korean <-> English) with deep knowledge of Christian and Reformed theological vocabulary.",
+    ...glossary,
+    `Translate the ${src} text into natural ${tgt} suitable for a church service.`,
+    "Return ONLY the translation — no notes, no quotes, no romanization.",
+    "",
+    `${src}: ${text}`,
+    `${tgt}:`,
+  ].join("\n");
+  const r = await fetchWithTimeout(`${OLLAMA_HOST}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, options: { temperature: 0, seed: 7, num_predict: 1024 } }),
+    timeout: OLLAMA_TIMEOUT_MS,
+  });
+  if (!r.ok) throw new Error(`status ${r.status}`);
+  const payload = await r.json();
+  const out = String(payload?.response ?? "").trim();
+  if (!out) throw new Error("empty response");
+  return out;
+}
+
+async function translateWithMyMemory(text, sourceLang, targetLang) {
+  // Free, no key; ~500 chars per request so translate sentence chunks.
+  const chunks = chunkText(text, 450);
+  const out = [];
+  for (const chunk of chunks) {
+    const url = `https://api.mymemory.translated.net/get?${new URLSearchParams({ q: chunk, langpair: `${sourceLang}|${targetLang}` })}`;
+    const r = await fetchWithTimeout(url, { timeout: 8000 });
+    if (!r.ok) throw new Error(`status ${r.status}`);
+    const payload = await r.json();
+    const t = payload?.responseData?.translatedText;
+    if (!t || payload?.responseStatus >= 400) throw new Error(payload?.responseDetails || "no result");
+    out.push(t);
+  }
+  return out.join(" ").trim();
+}
+
+async function translateWithLibre(text, sourceLang, targetLang) {
+  const r = await fetchWithTimeout(LIBRETRANSLATE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q: text, source: sourceLang, target: targetLang, format: "text" }),
+    timeout: 10000,
+  });
+  if (!r.ok) throw new Error(`status ${r.status}`);
+  const payload = await r.json();
+  return String(payload?.translatedText ?? "").trim() || null;
+}
+
+function chunkText(text, max) {
+  const sentences = text.split(/(?<=[.!?。…]|다\.|요\.)\s+/);
+  const chunks = [];
+  let cur = "";
+  for (const s of sentences) {
+    if ((cur + " " + s).trim().length > max && cur) {
+      chunks.push(cur.trim());
+      cur = "";
+    }
+    cur += " " + s;
+    while (cur.length > max) {
+      chunks.push(cur.slice(0, max));
+      cur = cur.slice(max);
+    }
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks;
+}
+
+async function fetchWithTimeout(url, { timeout = 8000, ...opts } = {}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("timed out");
+    throw error;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Custom words you add from the app -> data/custom-words.json (durable, git-trackable)
+// ---------------------------------------------------------------------------
+function readCustomWords() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(CUSTOM_WORDS_FILE, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCustomWords(words) {
+  const tmp = `${CUSTOM_WORDS_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(words, null, 2) + "\n");
+  fs.renameSync(tmp, CUSTOM_WORDS_FILE);
+}
+
+const clip = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+
+app.get("/api/custom-words", (_req, res) => res.json({ words: readCustomWords() }));
+
+app.post("/api/custom-words", (req, res) => {
+  const ko = clip(req.body?.ko, 80);
+  const en = clip(req.body?.en, 200);
+  const note = clip(req.body?.note, 300);
+  if (!ko || !en) return res.status(400).json({ error: "Both Korean and English are required." });
+  const words = readCustomWords();
+  const existing = words.find((w) => w.ko === ko);
+  if (existing) {
+    existing.en = en;
+    existing.note = note;
+    existing.updatedAt = new Date().toISOString();
+  } else {
+    words.push({ ko, en, note, addedAt: new Date().toISOString() });
+  }
+  writeCustomWords(words);
+  res.json({ words });
 });
 
-app.get("*", (req, res) => {
-  res.sendFile(path.join(STATIC_ROOT, "index.html"));
+app.delete("/api/custom-words", (req, res) => {
+  const ko = clip(req.query.ko, 80);
+  const words = readCustomWords().filter((w) => w.ko !== ko);
+  writeCustomWords(words);
+  res.json({ words });
 });
+
+// ---------------------------------------------------------------------------
+app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
+app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 app.listen(PORT, () => {
-  console.log(`Church Interpreter Helper running at http://localhost:${PORT}`);
-  console.log("Translation endpoint: POST /api/translate");
+  console.log(`Church Interpreter Helper → http://localhost:${PORT}`);
+  console.log(`  English: ${ESV_ENABLED ? "ESV (api.esv.org)" : "offline WEB — add ESV_API_KEY to .env.local for ESV"} · Korean: 개역한글 (offline)`);
+  console.log(`  Machine translation fallback: ${MT_PROVIDERS.join(" → ")}`);
 });
-
-async function translateWithOllama(text, sourceLang, targetLang) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${OLLAMA_HOST}/api/generate`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt: buildPrompt(text, sourceLang, targetLang),
-        stream: false,
-        options: {
-          temperature: 0.2,
-          num_predict: 2048,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Ollama responded with status ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const output = payload?.response;
-    if (typeof output !== "string" || output.trim().length === 0) {
-      throw new Error("Ollama returned an empty response.");
-    }
-
-    return output.trim();
-  } catch (error) {
-    if (error.name === "AbortError") {
-      console.warn("[translator] Ollama request timed out");
-      throw new Error("Ollama request timed out.");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function translateWithFallback(text, sourceLang, targetLang) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
-
-  try {
-    const response = await fetch(FALLBACK_TRANSLATE_URL, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        q: text,
-        source: sourceLang,
-        target: targetLang,
-        format: "text",
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Fallback responded with status ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const candidate =
-      payload?.translatedText ??
-      payload?.translated_text ??
-      payload?.translation ??
-      payload?.result ??
-      "";
-    if (typeof candidate !== "string" || candidate.trim().length === 0) {
-      throw new Error("Fallback returned an empty response.");
-    }
-
-    return candidate.trim();
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("Fallback request timed out.");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function buildPrompt(text, sourceLang, targetLang) {
-  const sourceLabel = sourceLang === "ko" ? "Korean" : "English";
-  const targetLabel = targetLang === "ko" ? "Korean" : "English";
-
-  return [
-    "You are an expert bilingual church interpreter with deep knowledge of Christian theological terminology.",
-    "Translate the following text accurately, paying special attention to theological and biblical terms.",
-    "",
-    "IMPORTANT THEOLOGICAL TERMS (use these as reference):",
-    "- 번영신학/귀복주의 = prosperity gospel",
-    "- 성령 = Holy Spirit",
-    "- 성령내주 = indwelling of the Holy Spirit",
-    "- 은혜 = grace",
-    "- 구원 = salvation",
-    "- 속죄 = atonement/redemption",
-    "- 성화 = sanctification",
-    "- 칭의 = justification",
-    "- 회개 = repentance",
-    "- 복음 = gospel",
-    "- 십일조 = tithe/tithing",
-    "- 장로 = elder",
-    "- 집사 = deacon",
-    "- 선교 = mission/missions",
-    "- 부활 = resurrection",
-    "- 강림 = advent/coming",
-    "- 삼위일체 = Trinity",
-    "- 성찬식 = communion/Lord's Supper",
-    "- 세례 = baptism",
-    "- 환란 = tribulation",
-    "- 교리 = doctrine",
-    "- 소요리 문답 = Shorter Catechism",
-    "- 서신서 = epistles",
-    "- 본질상 진노의 자녀 = by nature, children of wrath",
-    "- 성육하고 번성 = be fruitful and multiply",
-    "- 견고한 진 = stronghold",
-    "- 징계 = discipline",
-    "- 다스리고 정복 = rule over and subdue",
-    "- 마음을 주장하다 = guard our hearts",
-    "- 철야 예배 = all-night vigil",
-    "",
-    "Guidelines:",
-    "1. For theological terms, use the standard English theological equivalent",
-    "2. Preserve scripture references and names accurately",
-    "3. Maintain the tone appropriate for church context",
-    "4. Return ONLY the translation, no explanations or commentary",
-    "5. If given a scripture reference with multiple verses, translate the reference with verses labeled in between verses",
-    "",
-    `Source language: ${sourceLabel}`,
-    `Target language: ${targetLabel}`,
-    `Text to translate: ${text}`,
-    "",
-    "Translation:",
-  ].join("\n");
-}

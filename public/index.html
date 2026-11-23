@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interpreter Helper</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Interpreter <span>Helper</span></div>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-view="interpret" role="tab">Interpret</button>
+        <button class="tab" data-view="study" role="tab">Flashcards</button>
+        <button class="tab" data-view="glossary" role="tab">Glossary</button>
+      </nav>
+      <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+    </header>
+
+    <div id="settingsPanel" class="settings-panel" hidden>
+      <label class="field-inline">
+        <span>Show verses in</span>
+        <select id="verseLangSelect">
+          <option value="both">English + Korean</option>
+          <option value="en">English only</option>
+          <option value="ko">Korean only</option>
+        </select>
+      </label>
+      <label class="field-inline">
+        <input type="checkbox" id="autoMtToggle" />
+        <span>Auto machine-translate words not in my lists</span>
+      </label>
+      <p class="muted small" id="healthLine"></p>
+    </div>
+
+    <!-- ================= INTERPRET ================= -->
+    <section id="view-interpret" class="view active">
+      <div class="session-bar">
+        <div class="session-info">
+          <strong id="sessionTitle">No session</strong>
+          <button id="sessionScripture" class="link-btn" hidden></button>
+          <span id="sessionSpeaker" class="muted"></span>
+        </div>
+        <div class="session-actions">
+          <button id="exportSessionBtn" class="ghost-btn small">Export</button>
+          <button id="manageSessionsBtn" class="pill-btn small">Sessions</button>
+        </div>
+      </div>
+
+      <main class="chat-container">
+        <ul id="chatLog" class="chat-log" aria-live="polite"></ul>
+        <div id="liveSuggest" class="live-suggest" hidden></div>
+        <form id="chatForm" class="chat-form">
+          <textarea
+            id="chatInput"
+            class="chat-input"
+            placeholder="Korean or English word · 롬 8:28 / Jn 3:16-18 · paste sermon notes to scan"
+            autocomplete="off"
+            rows="1"
+          ></textarea>
+          <button type="submit" class="pill-btn">Send</button>
+        </form>
+      </main>
+    </section>
+
+    <!-- ================= FLASHCARDS ================= -->
+    <section id="view-study" class="view">
+      <div class="study-controls">
+        <label class="field-inline">
+          <span>Deck</span>
+          <select id="deckSelect"></select>
+        </label>
+        <label class="field-inline">
+          <span>Direction</span>
+          <select id="directionSelect">
+            <option value="ko-en">Korean → English</option>
+            <option value="en-ko">English → Korean</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </label>
+        <button id="restartDeckBtn" class="ghost-btn small">Shuffle &amp; restart</button>
+      </div>
+      <div class="study-progress">
+        <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+        <span id="progressText" class="muted small"></span>
+      </div>
+      <div id="cardStage" class="card-stage"></div>
+      <p class="muted small center">Space / click = flip · 1 = Again · 2 = Good · 3 = Easy</p>
+    </section>
+
+    <!-- ================= GLOSSARY ================= -->
+    <section id="view-glossary" class="view">
+      <div class="glossary-controls">
+        <input id="glossarySearch" type="search" placeholder="Search Korean, English, notes, or 초성 (ㅈㅂㄱㄷ)…" />
+        <select id="glossaryListFilter"></select>
+        <label class="field-inline"><input type="checkbox" id="glossaryStarred" /> <span>★ only</span></label>
+        <span id="glossaryCount" class="muted small"></span>
+      </div>
+      <details class="add-word" id="addWordBox">
+        <summary>＋ Add a word</summary>
+        <form id="addWordForm" class="add-word-form">
+          <input name="ko" placeholder="한국어" required maxlength="80" />
+          <input name="en" placeholder="English meaning" required maxlength="200" />
+          <input name="note" placeholder="Note (optional)" maxlength="300" />
+          <button class="pill-btn small" type="submit">Save</button>
+        </form>
+        <p class="muted small">Saved to <code>data/custom-words.json</code> on this computer — becomes a deterministic match immediately.</p>
+      </details>
+      <div class="glossary-actions">
+        <button id="downloadCsvBtn" class="ghost-btn small">Download CSV (Anki / print)</button>
+        <button id="printGlossaryBtn" class="ghost-btn small">Print cheat sheet</button>
+      </div>
+      <div id="glossaryTable" class="glossary-table"></div>
+    </section>
+
+    <!-- ================= SESSION DIALOG ================= -->
+    <dialog id="sessionDialog" class="modal">
+      <form method="dialog" class="modal-card">
+        <header>
+          <h2>Sessions</h2>
+          <p class="muted small">Keep each service's title, passage, and speaker together with its lookups.</p>
+        </header>
+        <section id="sessionList" class="session-list"></section>
+        <hr />
+        <label class="field">
+          <span class="field-label">Message title</span>
+          <input id="newTitle" placeholder="Sunday Service — Faith" />
+        </label>
+        <label class="field">
+          <span class="field-label">Scripture passage</span>
+          <input id="newScripture" placeholder="요 15:1-11 or John 15:1-11" />
+        </label>
+        <label class="field">
+          <span class="field-label">Pastor / Speaker</span>
+          <input id="newSpeaker" placeholder="Pastor Kim" />
+        </label>
+        <menu class="modal-actions">
+          <button value="cancel" class="ghost-btn">Close</button>
+          <button id="createSessionBtn" value="default" class="pill-btn">Create &amp; select</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="/js/app.js" type="module"></script>
+  </body>
+</html>

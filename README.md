@@ -1,76 +1,81 @@
-# Church Interpreter Helper (prototype)
+# Church Interpreter Helper
 
-A lightweight prototype for a church interpreter companion. The app ships as a static HTML/JS site so it can be opened locally or from any static host (e.g. GitHub Pages, Netlify, Vercel).
+A Korean ↔ English companion for live church interpreting. It is **deterministic first**: your own word lists decide the answer, the same input always gives the same output, and anything that comes from machine translation is clearly labelled.
 
-## Current capabilities
+## Run it
 
-- Starry-night themed chat surface that mimics a translator chatbot.
-- Session manager to capture service metadata (message title, scripture passage, pastor/speaker). Sessions persist in the browser via `localStorage`.
-- Message log per session so previous interpretations stay linked to the relevant gathering.
-- Translator that uses a small bilingual dictionary first, then falls back to a local LLM (via Ollama) with automatic fallback to LibreTranslate if the LLM is offline—all behind a single Express server on `http://localhost:5173`.
-- Scripture query recogniser that understands a few English/Korean aliases (e.g. `Acts`, `행`, `요한복음`) and fetches verses from [bible-api.com](https://bible-api.com/) (World English Bible), falling back to bundled samples when offline.
-- Similar-term suggestions (up to 10) when a word is unknown.
+```bash
+npm install
+npm start            # → http://localhost:5173
+npm test             # 240+ tests, incl. every passage in your scripture lists
+```
 
-## Quick start
+Optional: copy `.env.local.example` to `.env.local` to add an ESV API key or choose the machine-translation fallback.
 
-1. Install dependencies: `npm install`.
-2. (Optional but recommended) Install Ollama and pull a bilingual-capable model, e.g.:  
-   ```bash
-   ollama pull llama3
-   ```
-3. Start the all-in-one server:  
-   ```bash
-   npm start
-   ```  
-   This serves the frontend at [http://localhost:5173](http://localhost:5173) and exposes `POST /api/translate`.
-4. Visit the site, click **Manage Sessions** to create/select a session.
-5. Type Korean or English phrases in the chat box (press **Enter** to send, **Shift+Enter** for a new line). Unknown phrases first try your local Ollama model; if that fails, the server automatically falls back to LibreTranslate.
-6. Ask for passages by typing references such as `Acts 1:8` or `요한복음 3:16-17`. English aliases call the free scripture API; Korean aliases fall back to the bundled demo data when a Korean translation is unavailable.
+## What it does
 
-> Tip: Because everything runs in the browser, your data is stored locally. Clearing browser storage will remove saved sessions.
+### Interpret tab
+- **Instant matches while you type.** Glossary chips appear under the input before you press Enter. You can type 초성 too (`ㅈㅂㄱㄷ` → 중보기도).
+- **Particles and conjugations are handled.** 중보기도를, 시기했다, 망설였다, and 애통하며 all find your entry.
+- **Your original spellings still work.** 맹새 → 맹세, 귀복주의 → 기복주의. Close misspellings get "Did you mean" suggestions (compared letter by letter, using jamo).
+- **Every meaning is kept.** When a word appears in several lists (감동, 마음이 아프다, 고민…), all meanings are shown, each with the list it came from.
+- **English → Korean** works too (`jealous` → 질투 / 시기 / 시기하다).
+- **Paste sermon notes or a bulletin** to see every glossary word in them, then press **Make flashcards from these** to study before the service.
+- **Words that aren't in your lists** are shown as *Not in your word lists*, followed by a separate box labelled **⚠ Machine translation — verify**. Press **Save as my word** to keep the corrected meaning; from then on it matches exactly, like every other word.
 
-## What still needs to happen
+### Scripture
+Type references the way you'd jot them down:
 
-This prototype intentionally avoids external APIs so it can run for free, but that also limits fidelity:
+`Jn 3:16` · `Mt 16:16 -20` · `1Jn 3:8` · `롬 10:17` · `요한복음 3장 16-18절` · `시편 23편` · `Rom 8:1-2, 28` · `Eph 6:10-18; Jas 4:7` · `Matthew 4:23-5:2` · `Jude 3`
 
-- **Translation quality**: The shared LibreTranslate server is rate-limited. For real-time service translation you should deploy your own LibreTranslate instance (Docker), plug in a Marian/NLLB model, or connect to a local LLM with bilingual support via a small proxy.
-- **Scripture coverage**: bible-api.com currently returns the World English Bible. A licensed ESV dataset or an open translation (WEB/KRV, etc.) should replace or augment it, especially for Korean passages.
-- **Contextual awareness**: The glossary grows from previous translations, but there is no deep contextual reasoning. You can connect to a local inference server (Ollama, LM Studio) and proxy prompts through a custom backend to stay free of usage-based billing.
-- **Searchable archive**: Right now data lives in `localStorage`. To collaborate across devices you will need a backend (Firebase, Supabase, simple REST API) or file export/import.
-- **UI polish**: Add typing indicators, message timestamps, accessibility improvements, and responsive tweaks for tablets.
+All 66 books are supported, with English and Korean names and abbreviations. Verses appear side by side in English (ESV) and Korean (개역한글); you can switch to one language in ⚙ settings, with a Copy button. Lookups are instant and work offline, up to 200 verses per request.
 
-## LLM-backed translation workflow (Ollama example)
+| Bible | Source | License |
+|---|---|---|
+| 개역한글 (Korean, 1961) | bundled `data/bible/krv.json` | public domain |
+| World English Bible (Updated) | bundled `data/bible/webu.json` — **emergency fallback only** (no key / no internet), labelled when used | public domain |
+| **ESV** — the English shown | real ESV text fetched live from Crossway's official API (set `ESV_API_KEY`) | free for non-commercial use, with the required copyright notice (shown automatically) |
 
-This project includes `server.js`, an Express server that serves the frontend *and* proxies translation requests. The flow looks like this:
+NIV, 개역개정, and BibleGateway text are copyrighted, and there is no free API that permits bundling them, so they are not included. Rebuild the bundled files with `npm run build:bibles -- <download-dir>` (see `scripts/build-bibles.mjs`).
 
-1. The browser sends `{ text, sourceLang }` to `POST /api/translate` on the same origin (e.g., `http://localhost:5173/api/translate`).
-2. The server tries to translate via Ollama (`OLLAMA_HOST` / `OLLAMA_MODEL`). If it succeeds, the response is returned immediately.
-3. If the Ollama call fails or times out, the server automatically falls back to LibreTranslate (or a custom URL via `FALLBACK_TRANSLATE_URL`).
-4. The browser displays the translated text and stores it in the session glossary for future reuse.
+### Flashcards tab
+Decks: ★ Starred · Needs review · All words · each word list · My added words · each scripture list · decks saved from a sermon scan.
+Direction: KO→EN, EN→KO, or mixed. Spaced repetition uses Leitner boxes: **Space** flips the card, and **1 / 2 / 3** grade it Again / Good / Easy. Missed cards come back within the same round. Scripture cards show the full passage on the back. Progress is saved in your browser.
 
-### Customising the pipeline
+### Glossary tab
+Search Korean, English, notes, or 초성. Filter by list or ★. Add your own words here. You can also **Download CSV** (it imports into Anki) or **Print cheat sheet**, which prints a two-column layout.
 
-1. **Ollama options**  
-   - `OLLAMA_MODEL=solar npm start` to switch models.  
-   - `OLLAMA_HOST=http://localhost:11435 npm start` if you run Ollama on a different port.
+## Adding words
 
-2. **Disable Ollama / force fallback**  
-   Start the server with `OLLAMA_HOST=disabled npm start`. The server will skip the local call and use the fallback translator immediately.
+- **From the app:** use *Save as my word* or Glossary → *Add a word*. These are saved to `data/custom-words.json`. Commit that file to back it up.
+- **A whole new list:** copy a block in [`data/word-lists.js`](data/word-lists.js):
+  ```js
+  { id: "wl14", title: "Word List #14", entries: [
+    ["희년", "Year of Jubilee"],
+    ["맹세", "oath", { alt: ["맹새"], note: "…", star: true }],
+  ]},
+  ```
+  `alt` holds other spellings to accept, `note` holds nuance shown in yellow, and `star` adds the word to the Starred deck.
 
-3. **Use your own fallback API**  
-   Point `FALLBACK_TRANSLATE_URL` to any LibreTranslate-compatible endpoint:  
-   ```bash
-   FALLBACK_TRANSLATE_URL=https://your-instance.example.com/translate npm start
-   ```
+## Machine translation (fallback only)
 
-4. **Adjust timeouts**  
-   Use `OLLAMA_TIMEOUT_MS` (default 15000) to control how long the server waits before falling back.
+Machine translation is used only for words that aren't in your lists. It tries `MT_PROVIDERS` in order (default `ollama,mymemory`):
+- **Ollama:** a local LLM. It's free and private, uses temperature 0, and is given your glossary terms for that sentence so it keeps your wording.
+- **MyMemory:** a free web API with no key needed. The text you look up is sent to that service.
+- **LibreTranslate:** set `LIBRETRANSLATE_URL` to use your own instance.
 
-## Suggested next steps
+## Project layout
 
-1. Measure latency and tweak the LLM prompt/temperature or choose a faster model (e.g., `gemma2:2b` via Ollama) for live services.
-2. Import a full bilingual scripture dataset. Normalise book aliases (English/Korean abbreviations) and expand the parser to cover verse ranges, multiple passages, and chapter-only queries.
-3. Persist sessions in structured folders by exporting JSON or Markdown files. A simple “Download session” button can mirror the folder organisation you described (title/verse/speaker).
-4. Add tests (e.g. Vitest) for the parsing utilities so future upgrades are safe.
-
-Feel free to point me to the direction you prefer (pure front-end vs. lightweight backend) and I can keep building from here.
+```
+server.js                  Express: serves public/, /lib, word lists; /api/scripture, /api/translate, /api/custom-words
+lib/glossary.js            deterministic lookup / scan / fuzzy / reverse lookup
+lib/korean.js              Hangul helpers (jamo, 초성, particles, conjugation forms)
+lib/reference.js           scripture reference parser (EN + KO)
+lib/bible-books.js         66 books + aliases
+lib/scripture-service.js   passage assembly, versification fallback, ESV text alignment
+data/word-lists.js         YOUR word lists + scripture lists
+data/custom-words.json     words added from the app
+data/bible/*.json          bundled public-domain Bibles
+public/                    the web app (index.html, styles.css, js/)
+tests/                     vitest
+```

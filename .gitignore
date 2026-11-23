@@ -1,7 +1,14 @@
 node_modules/
 .DS_Store
-/npm-debug.log*
-/yarn-error.log*
-/pnpm-lock.yaml
-/dist/
-/tmp/
+npm-debug.log*
+coverage/
+.next/
+dist/
+tmp/
+
+# local config / secrets (ESV_API_KEY etc.)
+.env
+.env.local
+.claude/settings.local.json
+
+data/custom-words.json.tmp

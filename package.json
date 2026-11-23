@@ -1,19 +1,23 @@
 {
   "name": "church-interpreter-helper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "test": "vitest run",
     "test:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build:bibles": "node scripts/build-bibles.mjs"
   },
   "dependencies": {
-    "cors": "^2.8.5",
     "express": "^4.19.2"
   },
   "devDependencies": {
     "vitest": "^2.0.0",
     "@vitest/coverage-v8": "^2.0.0"
+  },
+  "description": "Deterministic Korean↔English church interpreter companion: your word lists, offline Bible (KRV + WEB/KJV, optional ESV), flashcards.",
+  "engines": {
+    "node": ">=20.12"
   }
 }
