@@ -44,7 +44,8 @@ const ESV_API_KEY = (process.env.ESV_API_KEY ?? "").trim();
 const ESV_ENABLED = ESV_API_KEY.length > 0 && !/your_esv/i.test(ESV_API_KEY);
 
 const DATA_DIR = path.join(__dirname, "data");
-const CUSTOM_WORDS_FILE = path.join(DATA_DIR, "custom-words.json");
+// Override with CUSTOM_WORDS_FILE=/path/file.json (used by tests / isolated runs).
+const CUSTOM_WORDS_FILE = process.env.CUSTOM_WORDS_FILE ?? path.join(DATA_DIR, "custom-words.json");
 
 // ---------------------------------------------------------------------------
 // Bibles (public domain, bundled) — loaded once at startup
