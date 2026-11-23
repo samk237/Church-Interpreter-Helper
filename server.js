@@ -1,5 +1,7 @@
 import express from "express";
 import fs from "node:fs";
+import http from "node:http";
+import QRCode from "qrcode";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { distributeEsvText, lookupPassages } from "./lib/scripture-service.js";
@@ -8,6 +10,7 @@ import { BOOKS } from "./lib/bible-books.js";
 import { buildTermPrompt, buildTranslatePrompt, cleanModelOutput, isShortTerm, parseTermResponse } from "./lib/mt-prompt.js";
 import { buildGlossary } from "./lib/glossary.js";
 import { WORD_LISTS } from "./data/word-lists.js";
+import { createPhoneGate, formatCode, isLoopback, lanAddresses, loadOrCreateCode } from "./server/phone-access.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +24,9 @@ for (const file of [".env.local", ".env"]) {
 }
 
 const PORT = Number.parseInt(process.env.PORT ?? "5173", 10);
+// Phone mode (`npm run phone`): reachable from other devices on the same Wi-Fi, protected by an access code.
+// Default (`npm start`): only this Mac can open it.
+const PHONE_MODE = process.argv.includes("--phone") || /^(1|true|yes)$/i.test(process.env.PHONE ?? "");
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 // If OLLAMA_MODEL isn't set, the best Korean-capable model you have installed is used.
 const OLLAMA_MODEL_PREFERENCE = [
@@ -72,19 +78,61 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "64kb" }));
 
+const PHONE_CODE = PHONE_MODE ? loadOrCreateCode(path.join(__dirname, ".phone-code")) : null;
+if (PHONE_MODE) {
+  const gate = createPhoneGate({ code: PHONE_CODE, publicPaths: ["/icons/", "/manifest.webmanifest", "/favicon.ico"] });
+  app.post("/unlock", express.urlencoded({ extended: false, limit: "2kb" }), gate.unlockHandler);
+  app.use(gate.middleware);
+}
+
+app.get("/favicon.ico", (_req, res) => res.sendFile(path.join(__dirname, "public", "icons", "icon-192.png")));
+
+// Home-screen app manifest. When an unlocked phone adds it to the home screen, the start URL
+// carries the access code so the installed app can unlock itself (it has its own cookie jar).
+app.get("/manifest.webmanifest", (req, res) => {
+  res.type("application/manifest+json").send(
+    JSON.stringify({
+      name: "Interpreter Helper",
+      short_name: "Interpreter",
+      description: "Korean ↔ English church interpreting companion",
+      start_url: PHONE_MODE && req.cihAuthed ? `/?key=${PHONE_CODE}` : "/",
+      scope: "/",
+      display: "standalone",
+      background_color: "#f7f7f5",
+      theme_color: "#f7f7f5",
+      icons: [
+        { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+        { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+        { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ],
+    })
+  );
+});
+
 // Only expose what the browser needs (NOT the project root).
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/lib", express.static(path.join(__dirname, "lib")));
 app.get("/data/word-lists.js", (_req, res) => res.sendFile(path.join(DATA_DIR, "word-lists.js")));
 
 app.get("/api/health", async (_req, res) => {
+  const reachable = await ollamaReachable();
   res.json({
     status: "ok",
     esv: ESV_ENABLED,
     offlineBibles: Object.keys(BIBLES),
     machineTranslation: MT_PROVIDERS,
-    ollama: { host: OLLAMA_HOST, reachable: await ollamaReachable(), model: ollamaStatus.model, installed: ollamaStatus.installed },
+    phoneMode: PHONE_MODE,
+    ollama: { reachable, model: ollamaStatus.model, label: reachable ? modelDisplayName(ollamaStatus.model) : null },
   });
+});
+
+// Phone pairing info (QR code + access code) — only for the Mac itself.
+app.get("/api/phone", async (req, res) => {
+  if (!isLoopback(req)) return res.status(403).json({ error: "Only available on the Mac running the helper." });
+  if (!PHONE_MODE) return res.json({ enabled: false });
+  const urls = lanAddresses().map((ip) => `http://${ip}:${PORT}/?key=${PHONE_CODE}`);
+  const qrSvg = urls[0] ? await QRCode.toString(urls[0], { type: "svg", margin: 1, errorCorrectionLevel: "M" }) : "";
+  res.json({ enabled: true, code: formatCode(PHONE_CODE), urls, qrSvg });
 });
 
 // ---------------------------------------------------------------------------
@@ -242,8 +290,18 @@ app.post("/api/translate", async (req, res) => {
   res.status(502).json({ error: "No machine translation available.", detail: errors.join("; ") });
 });
 
+/** Friendly model name for labels ("EXAONE 3.5" rather than "Ollama (exaone3.5:7.8b)"). */
+function modelDisplayName(model) {
+  const m = String(model ?? "");
+  if (/^exaone3\.5/.test(m)) return "EXAONE 3.5";
+  if (/^qwen2\.5/.test(m)) return "Qwen 2.5";
+  if (/^gemma2/.test(m)) return "Gemma 2";
+  if (/^llama3/.test(m)) return "Llama 3";
+  return m.replace(/:latest$/, "") || "local AI";
+}
+
 function providerLabel(p) {
-  if (p === "ollama") return `Ollama (${ollamaStatus.model})`;
+  if (p === "ollama") return modelDisplayName(ollamaStatus.model);
   if (p === "libretranslate") return "LibreTranslate";
   return p;
 }
@@ -378,7 +436,7 @@ function saveAiWord({ typed, sourceLang, translation, corrected, provider }) {
   const word = {
     ko: ko.slice(0, 80),
     en: en.slice(0, 200),
-    note: sourceLang === "en" ? `AI (${provider}) from English “${source}”: ${translation}` : `AI (${provider})`,
+    note: sourceLang === "en" ? `AI suggestion (${provider}) from English “${source}”: ${translation}` : `AI suggestion (${provider})`,
     ...(sourceLang === "ko" && corrected ? { alt: [typed] } : {}),
     status: "ai",
     addedAt: new Date().toISOString(),
@@ -426,9 +484,39 @@ app.delete("/api/custom-words", (req, res) => {
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
-app.listen(PORT, () => {
-  console.log(`Church Interpreter Helper → http://localhost:${PORT}`);
-  console.log(`  English: ${ESV_ENABLED ? "ESV (api.esv.org)" : "offline WEB — add ESV_API_KEY to .env.local for ESV"} · Korean: 개역한글 (offline)`);
-  console.log(`  Machine translation fallback: ${MT_PROVIDERS.join(" → ")}`);
-  warmUpOllama();
-});
+// ---------------------------------------------------------------------------
+// Start: localhost only by default; all interfaces (behind the access code) in phone mode.
+function listen(host, extra = {}) {
+  return new Promise((resolve) => {
+    const server = http.createServer(app);
+    server.once("error", (error) => {
+      if (host === "::1") return resolve(null); // no IPv6 loopback — fine
+      if (error.code === "EADDRINUSE") console.error(`Port ${PORT} is already in use — is the helper already running? (or set PORT=...)`);
+      else console.error(error);
+      process.exit(1);
+    });
+    server.listen({ port: PORT, host, ...extra }, () => resolve(server));
+  });
+}
+
+if (PHONE_MODE || process.env.HOST) {
+  await listen(process.env.HOST); // undefined = all interfaces
+} else {
+  await listen("127.0.0.1");
+  await listen("::1", { ipv6Only: true });
+}
+
+console.log(`Church Interpreter Helper → http://localhost:${PORT}`);
+console.log(`  English: ${ESV_ENABLED ? "ESV (api.esv.org)" : "offline WEB — add ESV_API_KEY to .env.local for ESV"} · Korean: 개역한글 (offline)`);
+console.log(`  AI fallback: ${MT_PROVIDERS.join(" → ")}`);
+if (PHONE_MODE) {
+  const urls = lanAddresses().map((ip) => `http://${ip}:${PORT}/?key=${PHONE_CODE}`);
+  console.log("\n📱 Phone mode — on the same Wi-Fi, scan this or open a link below:");
+  if (urls[0]) console.log(await QRCode.toString(urls[0], { type: "terminal", small: true }));
+  urls.forEach((u) => console.log(`   ${u}`));
+  console.log(`   Access code: ${formatCode(PHONE_CODE)}   (also shown in the app's ⚙ settings on this Mac)`);
+  if (!urls.length) console.log("   No Wi-Fi/LAN address found — connect this Mac to the same network as your phone.");
+} else {
+  console.log("  Only this Mac can open it. Use `npm run phone` to open it on your phone (same Wi-Fi).");
+}
+warmUpOllama();

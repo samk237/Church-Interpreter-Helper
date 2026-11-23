@@ -1,24 +1,74 @@
-import { aiReviewCount, loadCustomWords, onGlossaryChange, saveSettings, settings } from "./state.js";
+import { aiReviewCount, load, loadCustomWords, onGlossaryChange, save, saveSettings, settings } from "./state.js";
 import { initInterpret } from "./interpret.js";
 import { initStudy, refreshStudy, setStudyActive } from "./study.js";
 import { initGlossaryView, renderGlossary } from "./glossary-view.js";
+import { h } from "./dom.js";
 
 const $ = (id) => document.getElementById(id);
+const VIEWS = ["interpret", "study", "glossary"];
 
+// ---------- tabs ----------
 function showView(name) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
+  document.querySelectorAll(".tab").forEach((t) => {
+    const on = t.dataset.view === name;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", String(on));
+  });
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   setStudyActive(name === "study");
+  save("cih.view", name);
+  // Don't pop the phone keyboard open just by switching tabs.
+  if (name === "interpret" && !matchMedia("(pointer: coarse)").matches) $("chatInput").focus();
+}
+
+// ---------- theme: system (default) / light / dark ----------
+const THEME_KEY = "cih.theme";
+const themeLabel = { system: "◐", light: "☀", dark: "☾" };
+
+function currentTheme() {
   try {
-    localStorage.setItem("cih.view", name);
+    const t = localStorage.getItem(THEME_KEY);
+    return t === "light" || t === "dark" ? t : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function applyTheme(choice) {
+  if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
+  else delete document.documentElement.dataset.theme;
+  try {
+    if (choice === "system") localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, choice);
   } catch {
     /* ignore */
   }
-  if (name === "interpret") $("chatInput").focus();
+  $("themeBtn").textContent = themeLabel[choice];
+  $("themeBtn").title = `Theme: ${choice} (tap to change)`;
+  document.querySelectorAll("[data-theme-choice]").forEach((b) => {
+    const on = b.dataset.themeChoice === choice;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", String(on));
+  });
 }
 
+function initTheme() {
+  applyTheme(currentTheme());
+  $("themeBtn").addEventListener("click", () => {
+    const order = ["system", "light", "dark"];
+    applyTheme(order[(order.indexOf(currentTheme()) + 1) % order.length]);
+  });
+  document.querySelectorAll("[data-theme-choice]").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.themeChoice)));
+}
+
+// ---------- settings ----------
 async function initSettings() {
-  $("settingsBtn").addEventListener("click", () => ($("settingsPanel").hidden = !$("settingsPanel").hidden));
+  const panel = $("settingsPanel");
+  $("settingsBtn").addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+    $("settingsBtn").setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) refreshPhonePanel();
+  });
 
   const verseLang = $("verseLangSelect");
   verseLang.value = settings.verseLang;
@@ -38,22 +88,65 @@ async function initSettings() {
   try {
     const health = await fetch("/api/health").then((r) => r.json());
     $("healthLine").textContent =
-      `English: ${health.esv ? "ESV (api.esv.org)" : "ESV not set up — add ESV_API_KEY to .env.local (offline WEB used meanwhile)"}` +
+      `English: ${health.esv ? "ESV" : "ESV not set up — add ESV_API_KEY to .env.local (offline WEB meanwhile)"}` +
       ` · Korean: 개역한글 (offline)` +
-      ` · Machine translation (fallback): ${health.ollama.reachable ? `Ollama ${health.ollama.model}` : "off — start the Ollama app"}`;
+      ` · AI for new words: ${health.ollama?.reachable ? health.ollama.label : "off — open the Ollama app on the Mac"}`;
   } catch {
-    $("healthLine").textContent = "Server not reachable — start it with `npm start`.";
+    $("healthLine").textContent = "Can't reach the helper on the Mac. Is it running (npm start / npm run phone)?";
   }
 }
 
-document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
+/** "Use on your phone" section — only the Mac itself can see the code/QR. */
+async function refreshPhonePanel() {
+  const panel = $("phonePanel");
+  try {
+    const r = await fetch("/api/phone");
+    if (r.status === 403) {
+      panel.hidden = true; // we're on the phone already
+      return;
+    }
+    const info = await r.json();
+    panel.innerHTML = "";
+    panel.hidden = false;
+    if (!info.enabled) {
+      panel.append(
+        h(
+          "div",
+          { class: "phone-info" },
+          h("strong", {}, "📱 Use on your phone"),
+          h("span", { class: "muted small" }, "Quit this and start it with ", h("code", {}, "npm run phone"), " instead of ", h("code", {}, "npm start"), ". Your phone must be on the same Wi-Fi as this Mac.")
+        )
+      );
+      return;
+    }
+    const qr = h("div", { class: "qr", "aria-label": "QR code to open on phone" });
+    qr.innerHTML = info.qrSvg; // generated by the server's QR library (trusted)
+    panel.append(
+      qr,
+      h(
+        "div",
+        { class: "phone-info" },
+        h("strong", {}, "📱 Scan with your phone's camera"),
+        h("span", { class: "muted small" }, "Same Wi-Fi as this Mac. Then use Share → Add to Home Screen to open it like an app."),
+        h("span", { class: "small" }, "Or type the address and code:"),
+        ...info.urls.map((u) => h("code", {}, u.replace(/\?key=.*/, ""))),
+        h("span", { class: "phone-code" }, info.code)
+      )
+    );
+  } catch {
+    panel.hidden = true;
+  }
+}
 
+// ---------- AI review badge on the Glossary tab ----------
 function updateReviewBadge() {
   const n = aiReviewCount();
   const tab = document.querySelector('.tab[data-view="glossary"]');
   tab.textContent = "Glossary";
-  if (n) tab.append(Object.assign(document.createElement("span"), { className: "tab-badge", textContent: n, title: `${n} AI word(s) to review` }));
+  if (n) tab.append(h("span", { class: "tab-badge", title: `${n} AI word(s) to review` }, n));
 }
+
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
 
 onGlossaryChange(() => {
   renderGlossary();
@@ -61,16 +154,12 @@ onGlossaryChange(() => {
   updateReviewBadge();
 });
 
+initTheme();
 initSettings();
 initInterpret();
 initStudy();
 initGlossaryView();
 loadCustomWords();
 
-let initialView = "interpret";
-try {
-  initialView = localStorage.getItem("cih.view") || "interpret";
-} catch {
-  /* ignore */
-}
-showView(["interpret", "study", "glossary"].includes(initialView) ? initialView : "interpret");
+const initialView = load("cih.view", "interpret");
+showView(VIEWS.includes(initialView) ? initialView : "interpret");

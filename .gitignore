@@ -12,3 +12,6 @@ tmp/
 .claude/settings.local.json
 
 data/custom-words.json.tmp
+
+# phone access code (npm run phone)
+.phone-code

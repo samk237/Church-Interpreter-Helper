@@ -2,8 +2,25 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Interpreter Helper</title>
+    <script>
+      // Apply the saved theme before first paint (no flash). "system" = follow the device.
+      try {
+        var t = localStorage.getItem("cih.theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1d22" media="(prefers-color-scheme: dark)" />
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Interpreter" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -14,23 +31,41 @@
         <button class="tab" data-view="study" role="tab">Flashcards</button>
         <button class="tab" data-view="glossary" role="tab">Glossary</button>
       </nav>
-      <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+      <div class="top-actions">
+        <button id="themeBtn" class="icon-btn" title="Theme" aria-label="Switch theme">◐</button>
+        <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
+      </div>
     </header>
 
     <div id="settingsPanel" class="settings-panel" hidden>
-      <label class="field-inline">
-        <span>Show verses in</span>
-        <select id="verseLangSelect">
-          <option value="both">English + Korean</option>
-          <option value="en">English only</option>
-          <option value="ko">Korean only</option>
-        </select>
-      </label>
-      <label class="field-inline">
-        <input type="checkbox" id="autoMtToggle" />
-        <span>Auto machine-translate words not in my lists</span>
-      </label>
-      <p class="muted small" id="healthLine"></p>
+      <div class="settings-row">
+        <span class="field-inline">
+          <span>Theme</span>
+          <span class="segmented" id="themeSegmented" role="radiogroup" aria-label="Theme">
+            <button type="button" data-theme-choice="system">System</button>
+            <button type="button" data-theme-choice="light">Light</button>
+            <button type="button" data-theme-choice="dark">Dark</button>
+          </span>
+        </span>
+        <label class="field-inline">
+          <span>Verses</span>
+          <select id="verseLangSelect">
+            <option value="both">English + Korean</option>
+            <option value="en">English only</option>
+            <option value="ko">Korean only</option>
+          </select>
+        </label>
+        <label class="field-inline">
+          <input type="checkbox" id="autoMtToggle" />
+          <span>Ask AI automatically for words not in my lists</span>
+        </label>
+      </div>
+      <div class="settings-row">
+        <div id="phonePanel" class="phone-panel" hidden></div>
+      </div>
+      <div class="settings-row">
+        <p class="muted small" id="healthLine"></p>
+      </div>
     </div>
 
     <!-- ================= INTERPRET ================= -->
@@ -54,7 +89,7 @@
           <textarea
             id="chatInput"
             class="chat-input"
-            placeholder="Korean or English word · 롬 8:28 / Jn 3:16-18 · paste sermon notes to scan"
+            placeholder="Word, phrase, or 롬 8:28"
             autocomplete="off"
             rows="1"
           ></textarea>

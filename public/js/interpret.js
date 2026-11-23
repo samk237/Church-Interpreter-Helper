@@ -228,12 +228,16 @@ function renderFoundTable(data) {
 /** The AI box — always visually separate from your glossary. */
 function renderMt(data, { sentence }) {
   const mt = data.mt;
-  if (mt?.loading) return h("div", { class: "mt-box" }, h("span", { class: "muted small" }, sentence ? "Translating sentence (AI)…" : "Asking AI…"));
+  if (mt?.loading) return h("div", { class: "mt-box" }, h("span", { class: "muted small" }, sentence ? "AI is translating…" : "Asking AI…"));
 
   if (mt?.text) {
     const box = h("div", { class: "mt-box" });
     box.append(
-      h("div", { class: "source-label mt" }, sentence ? `🤖 Sentence · AI (${mt.provider}) using your terms — verify` : `🤖 AI · ${mt.provider} — verify`)
+      h(
+        "div",
+        { class: "source-label mt", title: `Local AI model: ${mt.provider}` },
+        sentence ? "🤖 AI translation (uses your terms) — verify" : "🤖 AI suggestion — verify"
+      )
     );
     if (mt.glossaryEntry) {
       // AI fixed the spelling and the fixed word is already in your lists: show YOUR entry.
@@ -248,7 +252,7 @@ function renderMt(data, { sentence }) {
     }
     box.append(h("div", { class: "mt-text" }, mt.text));
     if (mt.saved) {
-      box.append(h("div", { class: "muted small", style: "margin-top:6px" }, `Saved to Glossary → “AI — needs review” as ${mt.saved.ko} = ${mt.saved.en}`));
+      box.append(h("div", { class: "muted small", style: "margin-top:6px" }, "Saved to Glossary for review later — or confirm now:"));
       box.append(reviewButtons({ ko: mt.saved.ko, en: mt.saved.en, senses: [{ en: mt.saved.en, note: "" }] }));
     } else if (!sentence) {
       box.append(saveWordControls(data));

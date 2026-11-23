@@ -71,11 +71,15 @@ export function renderPassages(payload, { compact = false } = {}) {
           "button",
           {
             class: "ghost-btn small",
-            onclick: (e) => {
-              const text = [p.reference, ...p.verses.map((v) => `${v.verse} ${settings.verseLang === "ko" ? v.ko : v.en}`)].join("\n");
-              navigator.clipboard?.writeText(text);
-              e.target.textContent = "Copied";
-              setTimeout(() => (e.target.textContent = "Copy"), 1200);
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              const lines = [settings.verseLang === "ko" ? p.referenceKo : p.reference];
+              for (const v of p.verses) {
+                if (settings.verseLang !== "ko" && v.en) lines.push(`${v.verse} ${v.en}`);
+                if (settings.verseLang !== "en" && v.ko) lines.push(`${settings.verseLang === "both" ? "   " : `${v.verse} `}${v.ko}`);
+              }
+              btn.textContent = (await copyText(lines.join("\n"))) ? "Copied" : "Copy failed";
+              setTimeout(() => (btn.textContent = "Copy"), 1400);
             },
           },
           "Copy"
@@ -102,6 +106,38 @@ export function renderPassages(payload, { compact = false } = {}) {
     wrap.append(h("div", { class: "credit" }, credits.join("  ·  ")));
   }
   return wrap;
+}
+
+/** Copy text; works on phones opened over plain http (where navigator.clipboard is unavailable). */
+export async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  // Fallback for plain-http (phone over Wi-Fi): select a hidden textarea and use execCommand.
+  const ta = h("textarea", { style: "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px" });
+  ta.value = text;
+  ta.contentEditable = "true";
+  document.body.append(ta);
+  const range = document.createRange();
+  range.selectNodeContents(ta);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  ta.remove();
+  return ok;
 }
 
 export function download(filename, text, type = "text/plain") {

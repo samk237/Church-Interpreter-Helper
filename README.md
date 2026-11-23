@@ -6,11 +6,27 @@ A Korean ↔ English companion for live church interpreting. It is **determinist
 
 ```bash
 npm install
-npm start            # → http://localhost:5173
-npm test             # 240+ tests, incl. every passage in your scripture lists
+npm start            # this Mac only → http://localhost:5173
+npm run phone        # also open it on your phone (same Wi-Fi), protected by an access code
+npm test
 ```
 
-Optional: copy `.env.local.example` to `.env.local` to add an ESV API key or choose the machine-translation fallback.
+Optional: copy `.env.local.example` to `.env.local` to add your ESV API key.
+
+### Using it on your phone during a service
+
+1. On the Mac, run `npm run phone`. The terminal shows a QR code and an 8-character access code. The same QR code is in the app's ⚙ settings on the Mac.
+2. Make sure the phone is on the **same Wi-Fi** as the Mac, then scan the QR code with the phone's camera. The phone stays unlocked after that.
+3. Optional: use Share → **Add to Home Screen** so it opens full-screen like an app.
+
+Things to know:
+- Everything still runs on the Mac (your lists, ESV, the AI), so keep the Mac awake with the helper and Ollama running.
+- Other people on the Wi-Fi can't open the app without your access code. Wrong guesses are rate-limited. To change the code, delete the `.phone-code` file.
+- Some church Wi-Fi networks block devices from reaching each other. If the phone can't connect, turn on the phone's **Personal Hotspot** and join it from the Mac. ESV still works through the phone's data.
+- `npm start` (the default) can only be opened on the Mac itself.
+
+### Light / dark mode
+The app follows your device's theme by default. Use the ◐ button (or ⚙ → Theme) to pick System, Light, or Dark.
 
 ## What it does
 
@@ -76,9 +92,11 @@ lib/korean.js              Hangul helpers (jamo, 초성, particles, conjugation 
 lib/reference.js           scripture reference parser (EN + KO)
 lib/bible-books.js         66 books + aliases
 lib/scripture-service.js   passage assembly, versification fallback, ESV text alignment
-data/word-lists.js         YOUR word lists + scripture lists
+lib/mt-prompt.js           prompts for the local AI fallback
+server/phone-access.js     phone mode: access code, unlock page, rate limiting
+data/word-lists.js         YOUR word lists (incl. Darakbang terms) + scripture lists
 data/custom-words.json     words added from the app
 data/bible/*.json          bundled public-domain Bibles
-public/                    the web app (index.html, styles.css, js/)
+public/                    the web app (index.html, styles.css, js/, icons/)
 tests/                     vitest
 ```
