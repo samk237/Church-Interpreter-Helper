@@ -44,8 +44,7 @@
 
 **Forgot the website password?** Run `npm run web:setup` again:
 1. Type a new password.
-2. Press Enter to reuse your saved keys.
-3. Press Enter (No) when it offers to copy the Mac's words, so the website's own words are kept.
+2. Press Enter at each of the other questions. This reuses your saved keys and merges the Mac's data with the website's. Nothing is deleted.
 
 It republishes the site, and every device signs out.
 

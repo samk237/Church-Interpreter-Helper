@@ -3,16 +3,26 @@
 A Korean ↔ English companion for live church interpreting. It is **deterministic first**: your own word lists decide the answer, the same input always gives the same output, and anything that comes from machine translation is clearly labelled.
 
 > [!IMPORTANT]
-> ## 🔄 To update the website, run:
+> ## 🔄 Changed the code? Update the website:
 > ```bash
 > npm run web:deploy
 > ```
-> Run it in this project folder after **any change to the code or the word lists**. It takes about 30 seconds, and phones get the update the next time the app is opened (close and reopen the home-screen app). Your saved words, flashcards and sessions are never touched by an update.
->
-> **Other commands you'll use:**
-> - `npm run sync` merges this Mac's data with the website's.
-> - `npm start` runs Mac mode.
-> - `npm run web:setup` changes the website password.
+> **Pushing to GitHub does not update the website. This command is the only thing that publishes it.** Run it in this project folder after any change to the code. It takes about 30 seconds. Phones get the update the next time the app is opened (close and reopen the home-screen app). Saved words, flashcards and sessions are never touched by an update.
+
+## What to run, and when
+
+Nothing needs to run on a schedule, and nothing needs to be stopped. The website runs on Cloudflare by itself. Anything added **in the app** saves automatically and shows up on every device, including words, AI words waiting for review, flashcards, decks, sessions and settings.
+
+| Run in this folder | When |
+|---|---|
+| **`npm run web:deploy`** | After **any change to the code**, including hand edits to the built-in word lists in `data/word-lists.js`. Words added through the app don't need it. |
+| `npm run sync` | Only with Mac mode (`npm start`). Run it **before**, so the Mac has the website's latest, and **after**, so the website gets what was done on the Mac. If you only use the website, you never need it. |
+| `npm run web:setup` | To change the website password, or to swap in a new Gemini or ESV key. It publishes the site too. |
+| `npm start` / `npm run phone` | Runs Mac mode (see below). |
+
+If a command opens a browser asking you to log in to Cloudflare, log in and it carries on. Cloudflare asks again now and then.
+
+**Editing the code (people or AI assistants):** run `npm test`, then `npm run web:deploy`. Until that second step, the live site keeps running the old code.
 
 ## Two ways to run it
 
@@ -67,7 +77,7 @@ One-time setup:
    - offer to merge this Mac's saved data with the website (`npm run sync`)
 3. On your phone, open that address, sign in once, then Share → **Add to Home Screen**.
 
-After you change word lists or code, publish again with **`npm run web:deploy`**. To test the website locally: `npm run web:dev` (needs a `.dev.vars` file with `APP_PASSWORD=…`).
+After any code change (including hand edits to `data/word-lists.js`), publish again with **`npm run web:deploy`**. See [What to run, and when](#what-to-run-and-when). To test the website locally: `npm run web:dev` (needs a `.dev.vars` file with `APP_PASSWORD=…`).
 
 Everything sits behind your password, including the page, your lists, and the APIs. Wrong passwords are rate-limited.
 
