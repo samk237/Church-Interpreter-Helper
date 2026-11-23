@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { distributeEsvText, lookupPassages } from "./lib/scripture-service.js";
 import { formatReference } from "./lib/reference.js";
 import { BOOKS } from "./lib/bible-books.js";
+import { buildTranslatePrompt, cleanModelOutput, isShortTerm } from "./lib/mt-prompt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,8 @@ const OLLAMA_MODEL_PREFERENCE = [
   "gemma2:9b",
   "llama3",
 ].filter(Boolean);
+// Keep the model loaded between lookups (a service is ~1-2 hours).
+const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE ?? "3h";
 const OLLAMA_TIMEOUT_MS = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? "20000", 10);
 const MT_PROVIDERS = (process.env.MT_PROVIDERS ?? "ollama")
   .split(",")
@@ -254,32 +257,38 @@ function pickOllamaModel(installed) {
 
 async function translateWithOllama(text, sourceLang, targetLang, hints) {
   if (!(await ollamaReachable())) throw new Error("not running");
-  const src = sourceLang === "ko" ? "Korean" : "English";
-  const tgt = targetLang === "ko" ? "Korean" : "English";
-  const glossary = hints.length
-    ? ["Use EXACTLY these glossary translations where they appear:", ...hints.map((h) => `- ${h.ko} = ${h.en}`), ""]
-    : [];
-  const prompt = [
-    "You are an expert bilingual church interpreter (Korean <-> English) with deep knowledge of Christian and Reformed theological vocabulary.",
-    ...glossary,
-    `Translate the ${src} text into natural ${tgt} suitable for a church service.`,
-    "Translate faithfully: keep the speaker's exact meaning and sentence. Do NOT replace it with a Bible verse, do NOT add or drop ideas.",
-    "Return ONLY the translation — no notes, no quotes, no romanization.",
-    "",
-    `${src}: ${text}`,
-    `${tgt}:`,
-  ].join("\n");
   const r = await fetchWithTimeout(`${OLLAMA_HOST}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: ollamaStatus.model, prompt, stream: false, options: { temperature: 0, seed: 7, num_predict: 1024 } }),
+    body: JSON.stringify({
+      model: ollamaStatus.model,
+      prompt: buildTranslatePrompt(text, sourceLang, hints),
+      stream: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      options: { temperature: 0, seed: 7, num_predict: isShortTerm(text) ? 32 : 512 },
+    }),
     timeout: OLLAMA_TIMEOUT_MS,
   });
   if (!r.ok) throw new Error(`status ${r.status}`);
-  const payload = await r.json();
-  const out = String(payload?.response ?? "").trim();
+  const out = cleanModelOutput((await r.json())?.response);
   if (!out) throw new Error("empty response");
   return out;
+}
+
+/** Load the model into memory ahead of time so the first lookup in a service is fast. */
+async function warmUpOllama() {
+  if (!MT_PROVIDERS.includes("ollama") || !(await ollamaReachable())) return;
+  try {
+    await fetchWithTimeout(`${OLLAMA_HOST}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: ollamaStatus.model, keep_alive: OLLAMA_KEEP_ALIVE }),
+      timeout: 60000,
+    });
+    console.log(`  Ollama model ready: ${ollamaStatus.model}`);
+  } catch (error) {
+    console.warn(`  Ollama warm-up failed: ${error.message}`);
+  }
 }
 
 async function translateWithLibre(text, sourceLang, targetLang) {
@@ -362,4 +371,5 @@ app.listen(PORT, () => {
   console.log(`Church Interpreter Helper → http://localhost:${PORT}`);
   console.log(`  English: ${ESV_ENABLED ? "ESV (api.esv.org)" : "offline WEB — add ESV_API_KEY to .env.local for ESV"} · Korean: 개역한글 (offline)`);
   console.log(`  Machine translation fallback: ${MT_PROVIDERS.join(" → ")}`);
+  warmUpOllama();
 });
