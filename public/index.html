@@ -73,7 +73,7 @@
     <section id="view-interpret" class="view active">
       <div class="session-bar">
         <div class="session-info">
-          <strong id="sessionTitle">No session</strong>
+          <button id="sessionTitle" class="session-title" type="button" title="Rename or edit this session">No session</button>
           <button id="sessionScripture" class="link-btn" hidden></button>
           <span id="sessionSpeaker" class="muted"></span>
         </div>
@@ -158,6 +158,7 @@
         </header>
         <section id="sessionList" class="session-list"></section>
         <hr />
+        <h3 id="sessionFormTitle" class="form-title">New session</h3>
         <label class="field">
           <span class="field-label">Message title</span>
           <input id="newTitle" placeholder="Sunday Service — Faith" />

@@ -15,6 +15,10 @@ const html = (body, status = 200, headers = {}) =>
 export async function onRequest(context) {
   const { request, env, next } = context;
   const url = new URL(request.url);
+  // Every publish also gets its own frozen address (e.g. 1a2b3c4d.interpreter-helper.pages.dev). A phone saved
+  // there would be stuck on that version forever, so always send people to the main address.
+  const frozen = url.hostname.match(/^[0-9a-f]{8}\.([a-z0-9-]+\.pages\.dev)$/);
+  if (frozen) return Response.redirect(`https://${frozen[1]}${url.pathname}${url.search}`, 302);
   if (!env.APP_PASSWORD) return html("<p>Set the APP_PASSWORD secret first (npm run web:setup).</p>", 500);
   const secret = env.SESSION_SECRET || env.APP_PASSWORD;
 

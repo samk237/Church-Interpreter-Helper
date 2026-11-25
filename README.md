@@ -8,15 +8,17 @@ A Korean ↔ English companion for live church interpreting. It is **determinist
 > npm run web:deploy
 > ```
 > **Pushing to GitHub does not update the website. This command is the only thing that publishes it.** Run it in this project folder after any change to the code. It takes about 30 seconds. Phones get the update the next time the app is opened (close and reopen the home-screen app). Saved words, flashcards and sessions are never touched by an update.
+>
+> **Open the website only at https://interpreter-helper.pages.dev** (bookmark it, or Add to Home Screen from it). Publishing also prints a longer address like `https://1a2b3c4d.interpreter-helper.pages.dev`. That is a frozen copy of one version, so a device saved there never gets updates and doesn't share sessions. Copies published from now on send you to the main address automatically.
 
 ## What to run, and when
 
-Nothing needs to run on a schedule, and nothing needs to be stopped. The website runs on Cloudflare by itself. Anything added **in the app** saves automatically and shows up on every device, including words, AI words waiting for review, flashcards, decks, sessions and settings.
+Nothing needs to run on a schedule, and nothing needs to be stopped. The website runs on Cloudflare by itself. Anything added **in the app** saves automatically and shows up on your other devices within about a minute (right away when you switch to them), including words, AI words waiting for review, flashcards, decks, sessions and settings. Mac mode (`npm start`) merges with the website by itself while it runs.
 
 | Run in this folder | When |
 |---|---|
 | **`npm run web:deploy`** | After **any change to the code**, including hand edits to the built-in word lists in `data/word-lists.js`. Words added through the app don't need it. |
-| `npm run sync` | Only with Mac mode (`npm start`). Run it **before**, so the Mac has the website's latest, and **after**, so the website gets what was done on the Mac. If you only use the website, you never need it. |
+| `npm run sync` | Rarely. Mac mode merges with the website automatically while it runs. Use this to merge without starting the app, or `npm run sync -- --dry-run` to preview. |
 | `npm run web:setup` | To change the website password, or to swap in a new Gemini or ESV key. It publishes the site too. |
 | `npm start` / `npm run phone` | Runs Mac mode (see below). |
 
@@ -35,10 +37,10 @@ You can use either, or both. They share the same app and your same word lists.
 | ESV | ✓ (your key in `.env.local`) | ✓ (your key stored on Cloudflare) |
 | AI for new words | Local EXAONE on the Mac (private); Gemini first if you add a key | Gemini (free) → Cloudflare's free Gemma 4 as backup |
 | Korean "did you mean (AI guess)" | Only with a Gemini key | ✓ (Gemini, or Gemma 4 when Gemini is busy) |
-| Your words, AI words to review, flashcard progress, decks, sessions, settings | Saved on the Mac (`data/my-data.json`) | Saved on Cloudflare, shared by every device you sign in on |
-| Privacy | Everything stays on the Mac, unless you add a Gemini key | Password-protected; Gemini's free tier may use lookups to improve Google's products |
+| Your words, AI words to review, flashcard progress, decks, sessions, settings | Saved on the Mac (`data/my-data.json`) and merged with the website automatically while it runs (once the website is set up) | Saved on Cloudflare, shared by every device you sign in on |
+| Privacy | Lookups stay on the Mac, unless you add a Gemini key. Your saved data is merged with your website; add `SYNC_WITH_WEBSITE=off` to `.env.local` to keep it on the Mac only. | Password-protected; Gemini's free tier may use lookups to improve Google's products |
 
-Run **`npm run sync`** any time to merge the Mac and the website in both directions. See [Your data](#your-data).
+Mac mode and the website share your data automatically. See [Your data](#your-data).
 
 **Costs, free limits, and how the AIs compare:** see [LIMITS.md](LIMITS.md). It costs $0 as long as you never add a card or turn on billing.
 
@@ -73,9 +75,9 @@ One-time setup:
    - open a browser so you can sign in to Cloudflare (or create a free account)
    - create the database and the website
    - ask for a **website password**, plus your ESV and Gemini keys
-   - publish the site and print its address (`https://interpreter-helper….pages.dev`)
+   - publish the site and print its address (`https://interpreter-helper.pages.dev`)
    - offer to merge this Mac's saved data with the website (`npm run sync`)
-3. On your phone, open that address, sign in once, then Share → **Add to Home Screen**.
+3. On your phone, open **https://interpreter-helper.pages.dev** (not the longer address with a code in front), sign in once, then Share → **Add to Home Screen**.
 
 After any code change (including hand edits to `data/word-lists.js`), publish again with **`npm run web:deploy`**. See [What to run, and when](#what-to-run-and-when). To test the website locally: `npm run web:dev` (needs a `.dev.vars` file with `APP_PASSWORD=…`).
 
@@ -150,10 +152,12 @@ If no AI is available, you still get *Not in your word lists*, the glossary's ow
 
 Your **words, AI words waiting for review, flashcard progress, saved decks, sessions (transcripts), and settings** are all saved on the server. On the website that's Cloudflare, so **every phone, tablet and PC you sign in on shares the same data.** The theme, the open tab, and which session is open stay per device.
 
-- **Changes save instantly.** They go to Cloudflare right away. Another device shows them when you switch back to the app or refresh it.
+- **Changes save instantly.** They go to Cloudflare right away. Your other devices show them within about a minute while the app is open, and right away when you switch back to it.
 - **It works offline too.** Each device keeps a copy, so a dropped signal mid-service doesn't stop you. Changes made offline are saved as soon as the connection is back. ⚙ settings shows the status.
 - **Changes don't overwrite each other.** Each item remembers when it last changed, and the newest change wins. A phone that's been asleep can't wipe out newer progress from the PC, and deleted items stay deleted.
-- **Mac mode keeps its own copy** in `data/my-data.json`, so it works without internet. Run **`npm run sync`** to merge it with the website in both directions. Nothing is deleted. It's safe to run any time. `npm run sync -- --dry-run` shows what would change without changing anything.
+- **Mac mode keeps its own copy** in `data/my-data.json`, so it works without internet. While it runs, it merges that copy with the website automatically: when it starts, when the app refreshes, and a couple of seconds after each change. The terminal shows each merge (`↕ Synced: …`). If the website can't be reached, the Mac carries on from its own copy and catches up later. This uses your Cloudflare sign-in from setup; if it ever asks, run `npx wrangler login`. To turn it off, add `SYNC_WITH_WEBSITE=off` to `.env.local`.
+- **`npm run sync`** does the same merge by hand, without starting the app. Nothing is deleted, and it's safe to run any time. `npm run sync -- --dry-run` shows what would change without changing anything.
+- **Sessions:** tap a session's name at the top (or **Sessions → Edit**) to rename it or change its passage and speaker.
 - An AI word you reject (✗) isn't auto-saved again the next time the AI suggests it. You can still add it yourself.
 
 Your data is never committed to git. This repository is public; only the built-in word lists in `data/word-lists.js` are in it.
@@ -167,6 +171,7 @@ server/core/               shared by both: ai.js (Gemini/Claude/Workers AI), esv
                            user-data.js + user-data-api.js (your data: items, newest change wins), custom-words.js (word rules)
 server/web/                website-only: d1-store.js (Cloudflare database), providers.js; server/schema.sql
 server/file-store.js       Mac storage (data/my-data.json)
+server/website-link.js     Mac ↔ website merging (automatic in Mac mode, and npm run sync)
 server/phone-access.js     Mac phone mode: access code, unlock page, rate limiting
 lib/glossary.js            deterministic lookup / scan / fuzzy / reverse lookup (runs in the browser)
 lib/korean.js              Hangul helpers (jamo, 초성, particles, conjugation forms)

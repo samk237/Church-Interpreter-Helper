@@ -46,6 +46,12 @@ export function initInterpret() {
     t = setTimeout(updateSuggest, 60);
   });
   $("manageSessionsBtn").addEventListener("click", openSessionDialog);
+  // Tap the session's name to rename it (or change its passage / speaker).
+  $("sessionTitle").addEventListener("click", () => {
+    openSessionDialog();
+    if (activeSession()) startEditing(activeSession());
+  });
+  sessionDialog.addEventListener("close", resetSessionForm);
   $("createSessionBtn").addEventListener("click", onCreateSession);
   $("exportSessionBtn").addEventListener("click", exportSession);
   $("sessionScripture").addEventListener("click", () => {
@@ -518,21 +524,39 @@ function renderSessionList() {
             h("span", { class: "muted small" }, [s.scripture || "No passage", s.speaker, s.createdAt ? new Date(s.createdAt).toLocaleDateString() : ""].filter(Boolean).join(" · "))
           ),
           h(
-            "button",
-            {
-              class: "del-btn",
-              type: "button",
-              title: "Delete session",
-              onclick: (e) => {
-                e.stopPropagation();
-                if (!confirm(`Delete “${s.title}” and its history?`)) return;
-                sessions = sessions.filter((x) => x.id !== s.id);
-                removeItem("sessions", s.id);
-                if (activeSessionId === s.id) setActive(sessions[sessions.length - 1]?.id ?? null);
-                else renderAll();
+            "div",
+            { class: "session-item-actions" },
+            h(
+              "button",
+              {
+                class: "edit-btn",
+                type: "button",
+                title: "Rename, or change the passage or speaker",
+                onclick: (e) => {
+                  e.stopPropagation();
+                  startEditing(s);
+                },
               },
-            },
-            "Delete"
+              "Edit"
+            ),
+            h(
+              "button",
+              {
+                class: "del-btn",
+                type: "button",
+                title: "Delete session",
+                onclick: (e) => {
+                  e.stopPropagation();
+                  if (!confirm(`Delete “${s.title}” and its history?`)) return;
+                  sessions = sessions.filter((x) => x.id !== s.id);
+                  removeItem("sessions", s.id);
+                  if (editingId === s.id) resetSessionForm();
+                  if (activeSessionId === s.id) setActive(sessions[sessions.length - 1]?.id ?? null);
+                  else renderAll();
+                },
+              },
+              "Delete"
+            )
           )
         )
       );
@@ -566,12 +590,41 @@ function createSession({ title, scripture = "", speaker = "" }) {
   return s;
 }
 
+// The form under the session list creates a session, or edits one after "Edit".
+let editingId = null;
+
+function startEditing(s) {
+  editingId = s.id;
+  $("newTitle").value = s.title ?? "";
+  $("newScripture").value = s.scripture ?? "";
+  $("newSpeaker").value = s.speaker ?? "";
+  $("sessionFormTitle").textContent = `Edit “${s.title}”`;
+  $("createSessionBtn").textContent = "Save changes";
+  $("newTitle").focus();
+  $("newTitle").select();
+}
+
+function resetSessionForm() {
+  editingId = null;
+  ["newTitle", "newScripture", "newSpeaker"].forEach((id) => ($(id).value = ""));
+  $("sessionFormTitle").textContent = "New session";
+  $("createSessionBtn").textContent = "Create & select";
+}
+
 function onCreateSession(e) {
   e.preventDefault();
-  const title = $("newTitle").value.trim() || `Session ${new Date().toLocaleDateString()}`;
+  const title = $("newTitle").value.trim();
   const scripture = $("newScripture").value.trim();
-  createSession({ title, scripture, speaker: $("newSpeaker").value.trim() });
-  ["newTitle", "newScripture", "newSpeaker"].forEach((id) => ($(id).value = ""));
+  const speaker = $("newSpeaker").value.trim();
+  const editing = editingId && sessions.find((s) => s.id === editingId);
+  if (editing) {
+    Object.assign(editing, { title: title || editing.title, scripture, speaker });
+    saveSession(editing);
+    renderAll();
+    sessionDialog.close();
+    return;
+  }
+  createSession({ title: title || `Session ${new Date().toLocaleDateString()}`, scripture, speaker });
   sessionDialog.close();
   if (scripture && looksLikeReference(scripture)) submit(scripture);
 }

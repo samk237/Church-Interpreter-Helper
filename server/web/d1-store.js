@@ -37,9 +37,11 @@ export function chunkItems(items) {
 
 const ready = new WeakMap();
 
-export function createD1Store(db) {
+/** readOnly: never write (no table creation or upgrade), e.g. for `npm run sync -- --dry-run`. */
+export function createD1Store(db, { readOnly = false } = {}) {
   // Create the table on first use, and absorb words saved by the first website version (one JSON row in `store`).
   function ensure() {
+    if (readOnly) return Promise.resolve();
     if (!ready.has(db)) {
       const p = (async () => {
         await db.prepare(ITEMS_SCHEMA).run();

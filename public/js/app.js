@@ -121,7 +121,14 @@ function renderSyncLine() {
     dataHome === "web"
       ? "Your words, AI words to review, flashcards, decks and sessions are saved on your website and shared by every device you sign in on."
       : dataHome === "mac"
-        ? "Your words, AI words to review, flashcards, decks and sessions are saved on this Mac (data/my-data.json). Run npm run sync to merge them with the website."
+        ? "Your words, AI words to review, flashcards, decks and sessions are saved on this Mac (data/my-data.json)" +
+          (s.website?.state === "synced"
+            ? `, and merged with your website automatically (last ${new Date(s.website.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}).`
+            : s.website?.state === "paused"
+              ? `. Merging with your website is paused: ${s.website.message}`
+              : s.website?.state === "off"
+                ? `. Website sync is ${s.website.message}.`
+                : ".")
         : "";
   const state =
     s.state === "synced"

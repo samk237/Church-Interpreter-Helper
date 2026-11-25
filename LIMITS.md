@@ -25,6 +25,7 @@
 **A typical Sunday:** opening the app takes about 25 requests. Looking a word up in your own lists takes none, because it runs on the phone. An AI lookup or a scripture passage takes 1–3. Even a heavy service with 50 AI lookups and 20 passages stays under **300 of the 100,000** daily website requests, and uses about **50 of Gemini's ~500**. Saving data is tiny too:
 - Each flashcard answer or lookup is one database write, so 200 flashcards is 200 of 100,000.
 - Opening the app reads your saved items once, which is a few hundred to a few thousand of the 5 million daily reads.
+- While the app stays open on screen, it checks for your other devices' changes once a minute. That's 2 requests a minute (about 360 for a 3-hour service), plus one read of your saved items each time. Mac mode's automatic merge does about the same. Even with thousands of saved flashcard results, a day of this stays well under the 5 million reads.
 
 **The Mac and the website share one Gemini allowance and one ESV allowance**, because they use the same keys. The Cloudflare limits apply to the website only.
 
@@ -38,7 +39,7 @@
 | Where it works | Anywhere with internet, including cellular | On the Mac. With `npm run phone`, it also works on a phone on the same Wi-Fi. Some church Wi-Fi blocks this; the phone's Personal Hotspot fixes it. |
 | Without internet | Once the page is open, your word lists keep working. Scripture and AI need signal. | Word lists, the Korean Bible, and the local AI all work offline. ESV needs internet. |
 | AI order | Gemini → Gemma 4 (Cloudflare) | Gemini → EXAONE (on the Mac). Add `AI_PROVIDERS=ollama` to `.env.local` to keep the Mac fully private. |
-| Your words, AI words to review, flashcards, decks, sessions, settings | Saved on Cloudflare and shared by every device you sign in on | Saved on the Mac (`data/my-data.json`). `npm run sync` merges it with the website both ways. |
+| Your words, AI words to review, flashcards, decks, sessions, settings | Saved on Cloudflare and shared by every device you sign in on | Saved on the Mac (`data/my-data.json`) and merged with the website automatically while Mac mode runs. |
 | Getting updates | Run `npm run web:deploy` from the Mac | Restart `npm start` |
 | Sign-in | Website password, once per device | `npm run phone` uses an access code, once per device |
 

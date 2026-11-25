@@ -13,6 +13,7 @@ import { claudeProvider, DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, geminiProvi
 import { ESV_INFO, esvKeyUsable, fetchEsvTexts, parseEsvRefs } from "./server/core/esv.js";
 import * as dataApi from "./server/core/user-data-api.js";
 import { createFileStore } from "./server/file-store.js";
+import { connectWebsite, createWebsiteLink, websiteDatabaseId } from "./server/website-link.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +51,21 @@ const DATA_DIR = path.join(__dirname, "data");
 // with the website). Override with DATA_FILE=/path/file.json for tests / isolated runs.
 const DATA_FILE = process.env.DATA_FILE ?? path.join(DATA_DIR, "my-data.json");
 const store = createFileStore(DATA_FILE, { legacyWordsFile: process.env.DATA_FILE ? null : path.join(DATA_DIR, "custom-words.json") });
+
+// Merge that data with the website automatically while this runs (if the website is set up).
+// Off with SYNC_WITH_WEBSITE=off in .env.local, and always off for a DATA_FILE override (tests, isolated runs)
+// so those never touch your real data. WEBSITE_SYNC_TEST_FILE stands in for the website in tests.
+const SYNC_TEST_FILE = process.env.WEBSITE_SYNC_TEST_FILE;
+const websiteSync = (() => {
+  if (SYNC_TEST_FILE) return { connect: async () => createFileStore(SYNC_TEST_FILE) };
+  if (/^(off|no|false|0)$/i.test(process.env.SYNC_WITH_WEBSITE ?? "")) return { off: "off (SYNC_WITH_WEBSITE=off in .env.local)" };
+  if (process.env.DATA_FILE) return { off: "off (custom DATA_FILE)" };
+  if (!websiteDatabaseId(__dirname)) return { off: "off (the website isn't set up yet: npm run web:setup)" };
+  return { connect: () => connectWebsite(__dirname) };
+})();
+const link = websiteSync.connect
+  ? createWebsiteLink({ local: store, connect: websiteSync.connect, ...(SYNC_TEST_FILE ? { minGapMs: 500, pushDelayMs: 200 } : {}) })
+  : null;
 
 // ---------------------------------------------------------------------------
 const app = express();
@@ -244,11 +260,25 @@ const send = (handler) => async (req, res) => {
     res.status(500).json({ error: `Couldn't read or save your data (${error.message}).` });
   }
 };
-app.get("/api/custom-words", send(() => dataApi.getWords(store)));
-app.post("/api/custom-words", send((req) => dataApi.postWord(store, req.body)));
-app.delete("/api/custom-words", send((req) => dataApi.deleteWord(store, req.query.ko)));
-app.get("/api/sync", send(() => dataApi.getSync(store)));
-app.post("/api/sync", send((req) => dataApi.postSync(store, req.body)));
+// With the website link on, reads first catch up with the website (briefly), and saves are passed on to it.
+const fresh = async () => link?.fresh();
+const saved = (result) => {
+  if (result.status === 200) link?.changed();
+  return result;
+};
+app.get("/api/custom-words", send(async () => (await fresh(), dataApi.getWords(store))));
+app.post("/api/custom-words", send(async (req) => saved(await dataApi.postWord(store, req.body))));
+app.delete("/api/custom-words", send(async (req) => saved(await dataApi.deleteWord(store, req.query.ko))));
+app.get(
+  "/api/sync",
+  send(async () => {
+    await fresh();
+    const result = await dataApi.getSync(store);
+    result.body.website = link ? link.status() : { state: "off", message: websiteSync.off };
+    return result;
+  })
+);
+app.post("/api/sync", send(async (req) => saved(await dataApi.postSync(store, req.body))));
 
 // ---------------------------------------------------------------------------
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
@@ -280,7 +310,7 @@ console.log(`Church Interpreter Helper → http://localhost:${PORT}`);
 console.log(`  English: ${ESV_ENABLED ? "ESV (api.esv.org)" : "offline WEB — add ESV_API_KEY to .env.local for ESV"} · Korean: 개역한글 (offline)`);
 console.log(`  AI for new words: ${AI_PROVIDERS.join(" → ") || "none"}`);
 const dataShown = path.relative(__dirname, DATA_FILE);
-console.log(`  Your data: ${dataShown.startsWith("..") ? DATA_FILE : dataShown} (merge with the website: npm run sync)`);
+console.log(`  Your data: ${dataShown.startsWith("..") ? DATA_FILE : dataShown} · ${link ? "merged with your website automatically" : `website sync ${websiteSync.off}`}`);
 if (PHONE_MODE) {
   const urls = lanAddresses().map((ip) => `http://${ip}:${PORT}/?key=${PHONE_CODE}`);
   console.log("\n📱 Phone mode — on the same Wi-Fi, scan this or open a link below:");
@@ -292,3 +322,4 @@ if (PHONE_MODE) {
   console.log("  Only this Mac can open it. Use `npm run phone` to open it on your phone (same Wi-Fi).");
 }
 warmUpOllama();
+link?.start(); // catch up with the website right away

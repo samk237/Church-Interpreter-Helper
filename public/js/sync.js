@@ -3,7 +3,8 @@
  * (Cloudflare on the website, data/my-data.json on the Mac) so every device shares it.
  * This browser keeps a copy so the app opens instantly and keeps working offline:
  *   - changes are saved here at once and sent to the server right away (retried later if offline);
- *   - other devices' changes are fetched when the app opens and whenever it comes back to the front.
+ *   - other devices' changes are fetched when the app opens, when it comes back to the front,
+ *     and every minute while it's open on screen.
  * Each item remembers when it last changed; the newest change wins.
  * (Words have their own API — see state.js.)
  */
@@ -12,6 +13,7 @@ const cacheKey = (c) => `cih.data.v2.${c}`;
 const PENDING_KEY = "cih.pending.v2";
 const MAX_ITEM_CHARS = 1_400_000;
 const MAX_BATCH_CHARS = 1_500_000;
+const REFRESH_MS = 60_000;
 
 function readJson(key, fallback) {
   try {
@@ -34,6 +36,7 @@ const data = Object.fromEntries(COLLECTIONS.map((c) => [c, readJson(cacheKey(c),
 const pending = new Set(readJson(PENDING_KEY, []));
 const listeners = new Set();
 let status = { state: "starting", at: 0 };
+let website = null; // Mac mode only: how its automatic merge with the website is going
 const statusListeners = new Set();
 
 const pkey = (c, id) => `${c}\t${id}`;
@@ -72,7 +75,7 @@ export const removeItem = (c, id) => setItem(c, id, null);
 /** fn(Set of changed collections) after another device's changes arrive. */
 export const onDataChange = (fn) => listeners.add(fn);
 export const onSyncStatus = (fn) => statusListeners.add(fn);
-export const syncStatus = () => ({ ...status, pending: pending.size });
+export const syncStatus = () => ({ ...status, pending: pending.size, website });
 
 // ---------------------------------------------------------------------------
 let pushTimer = null;
@@ -136,7 +139,9 @@ export async function pull() {
   try {
     const r = await fetch("/api/sync", { cache: "no-store" });
     if (!r.ok) throw new Error(`status ${r.status}`);
-    ({ items } = await r.json());
+    const body = await r.json();
+    items = body.items;
+    website = body.website ?? null;
   } catch {
     setStatus("offline");
     return false;
@@ -167,7 +172,7 @@ export async function pull() {
   return true;
 }
 
-/** Start syncing. `onFront` also runs whenever the app comes back to the front (e.g. reload words). */
+/** Start syncing. `onFront` also runs on every refresh (e.g. reload words). */
 export function startSync(onFront = () => {}) {
   let last = 0;
   const refresh = () => {
@@ -180,7 +185,12 @@ export function startSync(onFront = () => {}) {
     if (document.visibilityState === "visible") refresh();
     else if (pending.size) push();
   });
+  window.addEventListener("focus", refresh); // e.g. clicking back into the laptop's window
   window.addEventListener("online", refresh);
+  // While the app stays open on screen, pick up other devices' changes every minute.
+  setInterval(() => {
+    if (document.visibilityState === "visible" && Date.now() - last >= REFRESH_MS - 1000) refresh();
+  }, REFRESH_MS);
   last = Date.now();
   return pull();
 }

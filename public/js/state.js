@@ -48,7 +48,9 @@ export function onGlossaryChange(fn) {
   listeners.add(fn);
 }
 
+let wordsJson = null;
 function rebuild(words) {
+  wordsJson = JSON.stringify(words);
   customWords = words;
   glossary = buildGlossary(WORD_LISTS, customWords);
   listeners.forEach((fn) => fn(glossary));
@@ -56,8 +58,10 @@ function rebuild(words) {
 
 export async function loadCustomWords() {
   try {
-    const r = await fetch("/api/custom-words");
-    if (r.ok) rebuild((await r.json()).words ?? []);
+    const r = await fetch("/api/custom-words", { cache: "no-store" });
+    if (!r.ok) return;
+    const words = (await r.json()).words ?? [];
+    if (JSON.stringify(words) !== wordsJson) rebuild(words); // unchanged: don't redraw (keeps your place)
   } catch {
     /* server offline — lists still work */
   }
